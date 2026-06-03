@@ -11,7 +11,7 @@ public class Sketch extends PApplet {
 
     public int canvasWidth = 60;
     public int canvasHeight = 40;
-    public int sandSize = 5;
+    public int sandSize = 10;
 
     public static void main(String[] args) {
         PApplet.main("Sketch");
@@ -44,10 +44,20 @@ public class Sketch extends PApplet {
 
         // update
         for (int x = canvasWidth - 1; x >= 0; x--) {
-            for (int y = canvasHeight - 2; y >= 0; y--) {  // bottom particles do not need to keep falling
-                if (canvas[x][y] != 0 && canvas[x][y + 1] == 0) {
+            for (int y = canvasHeight - 1; y >= 0; y--) {
+                if (canvas[x][y] != 0 && canvas[x][Math.clamp(y + 1, 0, canvasHeight - 1)] == 0) {  // falling rule
                     canvas[x][y + 1] = canvas[x][y];
                     canvas[x][y] = 0;
+                } else if (canvas[x][y] != 0 && (canvas[x][Math.clamp(y - 1, 0, canvasHeight - 1)] == 0 || y == 0)) {  // shufflling rule
+                    if (y == canvasHeight - 1) continue;
+
+                    if (x != canvasHeight - 1 && canvas[Math.clamp(x + 1, 0, canvasWidth - 1)][Math.clamp(y + 1, 0, canvasHeight - 1)] == 0) { // shuffle right
+                        canvas[x + 1][y + 1] = canvas[x][y];
+                        canvas[x][y] = 0;
+                    } else if (x != 0 && canvas[Math.clamp(x - 1, 0, canvasWidth - 1)][Math.clamp(y + 1, 0, canvasHeight - 1)] == 0) {  // shuffle left
+                        canvas[x - 1][y + 1] = canvas[x][y];
+                        canvas[x][y] = 0;
+                    }
                 }
             }
         } 
