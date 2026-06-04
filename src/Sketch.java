@@ -16,28 +16,27 @@ public class Sketch extends PApplet {
      *      0 means nothing
      * General Rules: general particle rules (common behaviour) (mask is 4294967295)
      *  there are 4 sections (each 8 bits as inidcated above). starting with the left most section:
-     *   1: Gravity (sector -16777216)
-     *      0 0000000
-     *      First bit represents direction of gravity (bit representing a boolean)
+     *   1: Gravity
+     *      0 0
+     *      First bit represents whether to apply gravity (bit representing a boolean)
+     *      Second bit represents direction of gravity (bit representing a boolean)
      *          when true means down else up
-     *      The rest of the bits represent the rate of gravity as a fraction represented as 1/x such that the particle will move once every x frames
-     *   2: Metadata (sector 16711680)
-     *      00000000
+     *   2: Metadata
+     *      xx000000 00000000
      *      storing data about the cell i guess. could be useful for keeping track of stuff
      *      This value is represented as a byte
-     *   3: Temperature (cause why not?) (sector 65280)
+     *   3: Temperature (cause why not?) (sector 65280 as int)
      *      00000000
      *      This is a byte (primative type). use it literally
-     *   4: Misc (other stuff that are just random or useful idk, ive gotta fill in the rest of the flags somehow) (starting with the left most bit (128)) (sector 255)
+     *   4: Misc (other stuff that are just random or useful idk, ive gotta fill in the rest of the flags somehow) (starting with the left most bit (128)) (sector 255 as int)
      *      Can Shuffle;
      *      Random Movement; (1/3 chance to move every frame, equal chance to mvoe in either direction)
-     *      Instantaneous Disintegration upon contact;
-     *      Destroy Adjacent; (depends on direction of movement)
-     *      
+     *      Already Applied Gravity?
+     *      Has Ticked (to prevent special behaviour and certain misc from triggering again)
      *      Triggerable;
      *      Immovable;
-     *      Indestructible;
-     *      Volitile; (randomly implodes and explodes)
+     *      Indestructible from outside causes;
+     *      Volitile; (randomly implodes and destroys itself)
      * 
      * Ticking order is as follows:
      *  Gravity
@@ -48,8 +47,8 @@ public class Sketch extends PApplet {
     public int brushRadius = 3;
     public long[][] canvas;  // x then y
 
-    public int canvasWidth = 100;
-    public int canvasHeight = 60;
+    public int canvasWidth = 100 * 2;
+    public int canvasHeight = 60 * 2;
     public int sandSize = 5;
 
     // TODO: subjected for removal (temorary testing)
@@ -71,7 +70,7 @@ public class Sketch extends PApplet {
     public void setup() {
         fill(255);
         colorMode(HSB, 360, 100, 100);
-        System.out.println(Integer.parseUnsignedInt("00000000 00000000 00000000 10000000".replace(" ", ""), 2));
+        // System.out.println(Long.parseUnsignedLong("00000000 00000000 00000000 00000000 01000000 00000000 00000000 00000000".replace(" ", ""), 2));
     }
 
     @Override
@@ -80,26 +79,6 @@ public class Sketch extends PApplet {
 
         renderCells();
         applyCellsCommonRules();
-
-        // update
-        // for (int x = canvasWidth - 1; x >= 0; x--) {
-        //     for (int y = canvasHeight - 1; y >= 0; y--) {
-        //         if (canvas[x][y] != 0 && canvas[x][Math.clamp(y + 1, 0, canvasHeight - 1)] == 0) {  // falling rule
-        //             canvas[x][y + 1] = canvas[x][y];
-        //             canvas[x][y] = 0;
-        //         } else if (canvas[x][y] != 0 && (canvas[x][Math.clamp(y - 1, 0, canvasHeight - 1)] == 0 || y == 0)) {  // shufflling rule
-        //             if (y == canvasHeight - 1) continue;
-
-        //             if (x != canvasWidth - 1 && canvas[Math.clamp(x + 1, 0, canvasWidth - 1)][Math.clamp(y + 1, 0, canvasHeight - 1)] == 0) { // shuffle right
-        //                 canvas[x + 1][y + 1] = canvas[x][y];
-        //                 canvas[x][y] = 0;
-        //             } else if (x != 0 && canvas[Math.clamp(x - 1, 0, canvasWidth - 1)][Math.clamp(y + 1, 0, canvasHeight - 1)] == 0) {  // shuffle left
-        //                 canvas[x - 1][y + 1] = canvas[x][y];
-        //                 canvas[x][y] = 0;
-        //             }
-        //         }
-        //     }
-        // } 
         
         // fps
         fill(255);
@@ -120,56 +99,130 @@ public class Sketch extends PApplet {
                 canvas[Math.clamp(mouseX + xOffset, 0, canvasWidth - 1)][Math.clamp(mouseY + yOffset, 0, canvasHeight - 1)] = encodeCellData(
                     color(hue, 100, 100),
                     (byte)1,
-                    0b10000001_00000000_00000000_00000000
+                    0b11000000_00000000_00000000_10000000
                 );
             }
         }
     }
 
     public void applyCellsCommonRules() {
-        for (int x = 0; x < canvasWidth; x++) {
-            for (int y = canvasHeight - 1; y >= 0; y--) {  // check from bottom of canvas to top
-                long cell = canvas[x][y];
-                if (getCellType(cell) == 0) continue;
+        for (int canvasX = 0; canvasX < canvasWidth; canvasX++) {
+            for (int canvasY = 0; canvasY < canvasHeight; canvasY++) {
+                long cell = canvas[canvasX][canvasY];
+                if (cell == EMPTY_CELL) continue;
 
-                int rules = getCellGeneralRules(cell);
+                int cellX = canvasX;
+                int cellY = canvasY;
+                int gravityDirection = (int)((cell & 1073741824L) >>> 30);
+                    
+                if ((cell & 32) != 32 && (cell & 2147483648L) == 2147483648L) {  // check if gravity has already been applied
+                    cell = canvas[cellX][cellY] |= 32;
+                    cellY += cellCommonsApplyGravity(gravityDirection, cellX, cellY);
+                }
+
+                if ((cell & 16) != 16) {  // check if cell has already been ticked by misc
+                    cell = canvas[cellX][cellY] |= 16;
+                    int moveDirection = gravityDirection == 1 ? 1 : -1;
+                    long updatedPos = cellCommonsMiscRules((int)(cell & 255), cellX, cellY, moveDirection);
+
+                    cellX = (int)(updatedPos >>> 32);
+                    cellY = (int)(updatedPos & Integer.MAX_VALUE);
+                }
+
+                if (canvas[cellX][cellY] == EMPTY_CELL) continue;
+                // TODO: apply special behaviour
+            }
+        }
+
+        // reset gravity flag and ticked flag
+        for (int x = 0; x < canvasWidth; x++) {
+            for (int y = 0; y < canvasHeight; y++) {
+                long cell = canvas[x][y];
+                if (cell == EMPTY_CELL) continue;
                 
-                cellCommonsApplyGravity((rules & -16777216) >>> 24, x, y);
-                cellCommonsMiscRules((rules & 255), x, y);
+                canvas[x][y] ^= (cell & 48);
             }
         }
     }
 
-    public void cellCommonsMiscRules(int rule, int x, int y) {
-    //     Can Shuffle;
-    //  *      Random Movement; (1/3 chance to move every frame, equal chance to mvoe in either direction)
-    //  *      Instantaneous Disintegration upon contact;
-    //  *      Destroy Adjacent; (depends on direction of movement)
-    //  *      
-    //  *      Triggerable;
-    //  *      Immovable;
-    //  *      Indestructible;
-    //  *      Volitile; (randomly implodes and explodes)
+    /**
+     * Applies Misc Rules. CAUTION: this function will update the canvas!
+     * @param rule misc rule see above for sector
+     * @param x cell x on canvas
+     * @param y cell y on canvas
+     * @param moveDirection where the cell is moving towards according to gravity rule (see above for sector)
+     * @return updated x and y coordinates. 32bits on the left is the x coordinates as int, and 32bits on the right is y coordinates as int
+     *         <br> Use a bitwise mask to access the value {@code x = (int)(res >>> 32);} {@code y = (int)(res & Integer.MAX_VALUE)}
+     */
+    public long cellCommonsMiscRules(int rule, int x, int y, int moveDirection) {
+        if ((rule & 128) == 128) {  // Can Shuffle
+            if (
+                ((y + moveDirection) != -1 && (y + moveDirection) != canvasHeight)      // ensure it cannot move off the screen vertically
+                && canvas[x][y + moveDirection] != EMPTY_CELL                           // only can shuffle if the space below or above occupied
+            ) {
+                if ((x + 1) != canvasWidth && canvas[x + 1][y + moveDirection] == EMPTY_CELL) {
+                    canvas[x + 1][y + moveDirection] = canvas[x][y];
+                    canvas[x][y] = EMPTY_CELL;
+    
+                    y += moveDirection;
+                    x++;
+                } else if ((x - 1) != -1 && canvas[x - 1][y + moveDirection] == EMPTY_CELL) {
+                    canvas[x - 1][y + moveDirection] = canvas[x][y];
+                    canvas[x][y] = EMPTY_CELL;
+
+                    y += moveDirection;
+                    x--;
+                }
+            }
+        }
+
+        if ((rule & 64) == 64 && random(3) == 0) {  // Random Movement; (1/3 chance to move every frame, equal chance to mvoe in either direction)
+            boolean moveLeft = random(2) == 0;
+            if (moveLeft && x != 0 && canvas[x - 1][y] == EMPTY_CELL) {
+                canvas[x - 1][y] = canvas[x][y];
+                canvas[x][y] = EMPTY_CELL;
+                x--;
+            } else if (x != canvasWidth - 1 && canvas[x + 1][y] == EMPTY_CELL) {
+                canvas[x + 1][y] = canvas[x][y];
+                canvas[x][y] = EMPTY_CELL;
+                x++;
+            }
+        }
+
+        if ((rule & 1) == 1 && random(1000) == 0) {  // volitile; (randomly implodes)
+            canvas[x][y] = EMPTY_CELL;
+        }
+
+        return ((long)x << 32) | y;
     }
 
-    public void cellCommonsApplyGravity(int rule, int x, int y) {
-        boolean isFalling = ((rule & 128) >>> 7) == 1 ? true : false;
-        int rateOfChange = rule & 127;
+    /**
+     * Applies gravity to the affected cell. CAUTION: this function will update the canvas!
+     * @param rule gravity rule (only give me the direction of fall bit) see above for sector
+     * @param x cell x coords in the canvas
+     * @param y cell y coords in the canvas
+     * @return returns where the cell was offseted (up -1 or down 1)
+     */
+    public int cellCommonsApplyGravity(int rule, int x, int y) {
+        boolean isFalling = rule == 1 ? true : false;
 
         int offset;
 
         if (isFalling) {
-            offset = y == canvasHeight - 1 ? 0 : rateOfChange;
+            offset = ((y + 1) == canvasHeight) ? 0 : 1;
         } else {  // going up
-            offset = y == 0 ? 0 : rateOfChange;
+            offset = ((y - 1) == -1) ? 0 : -1;
         }
 
-        if (offset == 0) return;
+        if (offset == 0) return 0;
 
-        if (frameCount % rateOfChange == 0 && canvas[x][y + offset] == 0) {
+        if (canvas[x][y + offset] == EMPTY_CELL) {
             canvas[x][y + offset] = canvas[x][y];
-            canvas[x][y] = 0;
+            canvas[x][y] = EMPTY_CELL;
+            return offset;
         }
+
+        return 0;
     }
 
     public void renderCells() {
@@ -199,10 +252,6 @@ public class Sketch extends PApplet {
 
     public byte getCellType(long val) {
         return (byte)((val & 1095216660480L) >>> 32);
-    }
-
-    public int getCellGeneralRules(long val) {
-        return (int)(val & 4294967295L);
     }
 }
 
