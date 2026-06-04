@@ -13,19 +13,20 @@ public class Sketch extends PApplet {
      * 
      * Red, Green, Blue: Particle Color (mask is -1099511627776) (this channel can also support hsb)
      * Type: Particle Type (for special behaviour if applicable) (mask is 1095216660480)
+     *      0 means nothing
      * General Rules: general particle rules (common behaviour) (mask is 4294967295)
      *  there are 4 sections (each 8 bits as inidcated above). starting with the left most section:
-     *   1: Gravity
+     *   1: Gravity (sector -16777216)
      *      0 0 000000
      *      First bit represents direction of gravity (bit representing a boolean)
      *          when true means down else up
      *      Second bit represents if the rate is a fractional (bit representing a boolean)
      *          when true the rest of the bits are used in the equation 1/x such that the particle will update once every x frames
      *      The rest of the bits represent the rate of gravity
-     *   2: Replication
-     *      0 0 000000
-     *      First bit represents whether or not this cell will perform a replication (bit representing a boolean)
-     *      Second bit represents the direction of replication (bit representing a boolean)
+     *   2: Replication (sector 16711680)
+     *      0 0000000
+     *      Will only replicate when replication counter is non zero
+     *      First bit represents the direction of replication (bit representing a boolean)
      *          when true it replicates down else up
      *      The rest of the bits represents how much times to replicate (aka. replication counter)
      *          The current cell will attempt to propagate into the direction as described in the second bit
@@ -34,10 +35,10 @@ public class Sketch extends PApplet {
      *              If there is not enough space to replicate it will move in the direction of replication and exchange places with cells of the same type
      *          The replicated cell should inhert the same replication data with the excpetion that the times to replicate goes down by one
      *          The original cell should also decrement its replication counter
-     *   3: Temperature (cause why not?)
+     *   3: Temperature (cause why not?) (sector 65280)
      *      00000000
      *      This is a byte (primative type). use it literally
-     *   4: Misc (other stuff that are just random or useful idk, ive gotta fill in the rest of the flags somehow) (starting with the left most bit (128))
+     *   4: Misc (other stuff that are just random or useful idk, ive gotta fill in the rest of the flags somehow) (starting with the left most bit (128)) (sector 255)
      *      Can Shuffle;
      *      Random Movement; (1/3 chance to move every frame, equal chance to mvoe in either direction)
      *      Instantaneous Disintegration upon contact;
@@ -73,6 +74,7 @@ public class Sketch extends PApplet {
     public void setup() {
         fill(255);
         colorMode(HSB, 360, 100, 100);
+        System.out.println(Integer.parseUnsignedInt("00000000 00000000 00000000 10000000".replace(" ", ""), 2));
     }
 
     @Override
@@ -118,13 +120,51 @@ public class Sketch extends PApplet {
         
         for (int yOffset = -brushRadius; yOffset <= brushRadius; yOffset++) {
             for (int xOffset = -brushRadius; xOffset <= brushRadius; xOffset++) {
-                canvas[Math.clamp(mouseX + xOffset, 0, canvasWidth - 1)][Math.clamp(mouseY + yOffset, 0, canvasHeight - 1)] = encodeCellData(color(hue, 100, 100), (byte)0, 1);
+                canvas[Math.clamp(mouseX + xOffset, 0, canvasWidth - 1)][Math.clamp(mouseY + yOffset, 0, canvasHeight - 1)] = encodeCellData(
+                    color(hue, 100, 100),
+                    (byte)1,
+                    0b10000001_00000000_00000000_00000000
+                );
             }
         }
     }
 
     public void updateCellsCommonRules() {
+        for (int x = 0; x < canvasWidth; x++) {
+            for (int y = canvasHeight - 1; y >= 0; y--) {
+                long cell = canvas[x][y];
+                if (getCellType(cell) == 0) continue;
 
+                int rules = getCellGeneralRules(cell);
+                int yOffset = cellCommonsGravityCalc((rules & -16777216) >>> 24, y);
+                if (yOffset != 0 && getCellType(canvas[x][y + yOffset]) == 0) {
+                    canvas[x][y + yOffset] = canvas[x][y];
+                    canvas[x][y] = 0;
+                }
+
+                cellCommonsPerformReplication((rules & 16711680) >>> 16, x, y);
+            }
+        }
+    }
+
+    public int cellCommonsPerformReplication(int rule, int x, int y) {
+        boolean shouldReplicateDown
+    }
+
+    public int cellCommonsGravityCalc(int rule, int yPos) {
+        boolean isFalling = ((rule & 128) >>> 7) == 1 ? true : false;
+        boolean isFractional = ((rule & 64) >>> 8) == 1 ? true : false;
+        int rateOfChange = rule & 63;
+
+        if (isFalling) {
+            if (yPos == canvasHeight - 1) return 0;
+            if (!isFractional) return rateOfChange;
+            return (frameCount % rateOfChange) == 0 ? 1 : 0;
+        } else {  // going up
+            if (yPos == 0) return 0;
+            if (!isFractional) return -rateOfChange;
+            return (frameCount % rateOfChange) == 0 ? -1 : 0;
+        }
     }
 
     public void renderCells() {
