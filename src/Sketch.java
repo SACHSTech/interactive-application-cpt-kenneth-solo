@@ -31,7 +31,7 @@ public class Sketch extends PApplet {
      *      The rest of the bits represents how much times to replicate (aka. replication counter)
      *          The current cell will attempt to propagate into the direction as described in the second bit
      *          The current cell is guaranteed to replicate once, and has a 10% to replicate twice and 1% to replicate thrice
-     *              The cell will only replicate when it has the space to do so
+     *              If it cannot replicate twice or thrice it will replicate the lowest amount of times possible given the space
      *              If there is not enough space to replicate it will move in the direction of replication and exchange places with cells of the same type
      *          The replicated cell should inhert the same replication data with the excpetion that the times to replicate goes down by one
      *          The original cell should also decrement its replication counter
@@ -48,10 +48,16 @@ public class Sketch extends PApplet {
      *      Immovable;
      *      Indestructible;
      *      Volitile; (randomly implodes and explodes)
+     * 
+     * Ticking order is as follows:
+     *  Gravity
+     *  Special Behaviour
+     *  Replication
      */
 
     public int brushRadius = 3;
     public long[][] canvas;  // x then y
+    public long[][] updateCanvas;  // x then y
 
     public int canvasWidth = 100;
     public int canvasHeight = 60;
@@ -59,6 +65,8 @@ public class Sketch extends PApplet {
 
     // TODO: subjected for removal (temorary testing)
     public int count = 0;
+
+    public static final int EMPTY_CELL = 0;
 
     public static void main(String[] args) {
         PApplet.main("Sketch");
@@ -68,6 +76,7 @@ public class Sketch extends PApplet {
     public void settings() {
         size(canvasWidth * sandSize, canvasHeight * sandSize);
         canvas = new long[canvasWidth][canvasHeight];
+        updateCanvas = canvas.clone();
     }
 
     @Override
@@ -108,6 +117,9 @@ public class Sketch extends PApplet {
         fill(255);
         textAlign(LEFT, TOP);
         text(String.format("fps %d", (int)frameRate), 0, 0);
+
+        canvas = updateCanvas;
+        updateCanvas = new long[canvasWidth][canvasHeight];
     }
 
     @Override
@@ -131,24 +143,34 @@ public class Sketch extends PApplet {
 
     public void updateCellsCommonRules() {
         for (int x = 0; x < canvasWidth; x++) {
-            for (int y = canvasHeight - 1; y >= 0; y--) {
+            for (int y = canvasHeight - 1; y >= 0; y--) {  // check from bottom of canvas to top
                 long cell = canvas[x][y];
                 if (getCellType(cell) == 0) continue;
 
                 int rules = getCellGeneralRules(cell);
                 int yOffset = cellCommonsGravityCalc((rules & -16777216) >>> 24, y);
-                if (yOffset != 0 && getCellType(canvas[x][y + yOffset]) == 0) {
-                    canvas[x][y + yOffset] = canvas[x][y];
-                    canvas[x][y] = 0;
-                }
+                if (yOffset != 0 && getCellType(updateCanvas[x][y + yOffset]) != EMPTY_CELL) yOffset = 0;
+                updateCanvas[x][y + yOffset] = canvas[x][y];
 
                 cellCommonsPerformReplication((rules & 16711680) >>> 16, x, y);
             }
         }
     }
 
-    public int cellCommonsPerformReplication(int rule, int x, int y) {
-        boolean shouldReplicateDown
+    public void cellCommonsPerformReplication(int rule, int x, int y) {
+        boolean shouldReplicateDown = ((rule & 128) >>> 7) == 1 ? true : false;
+        int yOffset = shouldReplicateDown ? 1 : 0;
+        int updatedReplicationCount = (rule & 127) - 1;
+
+        if (random(10) == 0) {  // duplicate twice
+            
+        } else if (random(100) == 0) {  // duplicate thrice
+
+        } else {  // duplicate once
+            if (getCellType(updateCanvas[x][y + yOffset]) != 0) return;
+            updateCanvas[x][y] = canvas[x][y] & 8323072;
+            updateCanvas[x][y + yOffset]
+        }
     }
 
     public int cellCommonsGravityCalc(int rule, int yPos) {
