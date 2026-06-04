@@ -21,7 +21,7 @@ public class Sketch extends PApplet {
      *      First bit represents whether to apply gravity (bit representing a boolean)
      *      Second bit represents direction of gravity (bit representing a boolean)
      *          when true means down else up
-     *   2: Metadata
+     *   2: Metadata (just borrowed the rest of the bits from the gravity byte, dont mind me)
      *      xx000000 00000000
      *      storing data about the cell i guess. could be useful for keeping track of stuff
      *      This value is represented as a byte
@@ -46,6 +46,7 @@ public class Sketch extends PApplet {
 
     public int brushRadius = 3;
     public long[][] canvas;  // x then y
+    public int[][][] canvasFloor; // x, y, (0 == floor, 1 == ceiling)
 
     public int canvasWidth = 100 * 2;
     public int canvasHeight = 60 * 2;
@@ -78,7 +79,7 @@ public class Sketch extends PApplet {
         background(0);
 
         renderCells();
-        applyCellsCommonRules();
+        applyCellsRuleBehaviours();
         
         // fps
         fill(255);
@@ -105,11 +106,23 @@ public class Sketch extends PApplet {
         }
     }
 
-    public void applyCellsCommonRules() {
+    public void applyCellsRuleBehaviours() {
         for (int canvasX = 0; canvasX < canvasWidth; canvasX++) {
+            boolean canShuffle = true;
+            int lastLayer = -1;
+
             for (int canvasY = 0; canvasY < canvasHeight; canvasY++) {
                 long cell = canvas[canvasX][canvasY];
-                if (cell == EMPTY_CELL) continue;
+                if (cell == EMPTY_CELL) {
+                    if (lastLayer == -1) {
+                        lastLayer = canvasY;
+                        canvasY = canvasHeight - 1;
+                    } else {
+                        if (canShuffle) canShuffle = false;
+                    }
+                    
+                    continue;
+                }
 
                 int cellX = canvasX;
                 int cellY = canvasY;
@@ -123,7 +136,7 @@ public class Sketch extends PApplet {
                 if ((cell & 16) != 16) {  // check if cell has already been ticked by misc
                     cell = canvas[cellX][cellY] |= 16;
                     int moveDirection = gravityDirection == 1 ? 1 : -1;
-                    long updatedPos = cellCommonsMiscRules((int)(cell & 255), cellX, cellY, moveDirection);
+                    long updatedPos = cellCommonsMiscRules((int)(cell & 255), cellX, cellY, moveDirection, canShuffle);
 
                     cellX = (int)(updatedPos >>> 32);
                     cellY = (int)(updatedPos & Integer.MAX_VALUE);
@@ -151,24 +164,23 @@ public class Sketch extends PApplet {
      * @param x cell x on canvas
      * @param y cell y on canvas
      * @param moveDirection where the cell is moving towards according to gravity rule (see above for sector)
+     * @param allowShuffle allow the cell to shuffle
      * @return updated x and y coordinates. 32bits on the left is the x coordinates as int, and 32bits on the right is y coordinates as int
      *         <br> Use a bitwise mask to access the value {@code x = (int)(res >>> 32);} {@code y = (int)(res & Integer.MAX_VALUE)}
      */
-    public long cellCommonsMiscRules(int rule, int x, int y, int moveDirection) {
-        if ((rule & 128) == 128) {  // Can Shuffle
+    public long cellCommonsMiscRules(int rule, int x, int y, int moveDirection, boolean allowShuffle) {
+        if ((rule & 128) == 128 && allowShuffle) {  // Can Shuffle
             if (
                 ((y + moveDirection) != -1 && (y + moveDirection) != canvasHeight)      // ensure it cannot move off the screen vertically
                 && canvas[x][y + moveDirection] != EMPTY_CELL                           // only can shuffle if the space below or above occupied
             ) {
                 if ((x + 1) != canvasWidth && canvas[x + 1][y + moveDirection] == EMPTY_CELL) {
-                    canvas[x + 1][y + moveDirection] = canvas[x][y];
-                    canvas[x][y] = EMPTY_CELL;
+                    moveRelative(x, y, 1, moveDirection);
     
                     y += moveDirection;
                     x++;
                 } else if ((x - 1) != -1 && canvas[x - 1][y + moveDirection] == EMPTY_CELL) {
-                    canvas[x - 1][y + moveDirection] = canvas[x][y];
-                    canvas[x][y] = EMPTY_CELL;
+                    moveRelative(x, y, -1, moveDirection);
 
                     y += moveDirection;
                     x--;
@@ -179,12 +191,10 @@ public class Sketch extends PApplet {
         if ((rule & 64) == 64 && random(3) == 0) {  // Random Movement; (1/3 chance to move every frame, equal chance to mvoe in either direction)
             boolean moveLeft = random(2) == 0;
             if (moveLeft && x != 0 && canvas[x - 1][y] == EMPTY_CELL) {
-                canvas[x - 1][y] = canvas[x][y];
-                canvas[x][y] = EMPTY_CELL;
+                moveRelative(x, y, -1, 0);
                 x--;
             } else if (x != canvasWidth - 1 && canvas[x + 1][y] == EMPTY_CELL) {
-                canvas[x + 1][y] = canvas[x][y];
-                canvas[x][y] = EMPTY_CELL;
+                moveRelative(x, y, 1, 0);
                 x++;
             }
         }
@@ -217,12 +227,23 @@ public class Sketch extends PApplet {
         if (offset == 0) return 0;
 
         if (canvas[x][y + offset] == EMPTY_CELL) {
-            canvas[x][y + offset] = canvas[x][y];
-            canvas[x][y] = EMPTY_CELL;
+            moveRelative(x, y, 0, offset);
             return offset;
         }
 
         return 0;
+    }
+
+    public boolean moveAbsolute(int x, int y, int targetX, int targetY) {
+        if (canvas[targetX][targetY] != EMPTY_CELL) return false;
+        canvas[targetX][targetY] = canvas[x][y];
+        canvas[x][y] = EMPTY_CELL;
+
+        return true;
+    }
+
+    public boolean moveRelative(int x, int y, int relX, int relY) {
+        return moveAbsolute(x, y, x + relX, y + relY);
     }
 
     public void renderCells() {
