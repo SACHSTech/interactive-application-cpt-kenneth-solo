@@ -3,6 +3,6 @@
         "src"
     ],
     "java.project.referencedLibraries": [
-        "c:\\Users\\kenneth\\Desktop\\ics3u1\\interactive-application-cpt-kenneth-solo\\lib\\core.jar"
+        "lib\\core.jar"
     ]
 }

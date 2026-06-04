@@ -17,24 +17,14 @@ public class Sketch extends PApplet {
      * General Rules: general particle rules (common behaviour) (mask is 4294967295)
      *  there are 4 sections (each 8 bits as inidcated above). starting with the left most section:
      *   1: Gravity (sector -16777216)
-     *      0 0 000000
+     *      0 0000000
      *      First bit represents direction of gravity (bit representing a boolean)
      *          when true means down else up
-     *      Second bit represents if the rate is a fractional (bit representing a boolean)
-     *          when true the rest of the bits are used in the equation 1/x such that the particle will update once every x frames
-     *      The rest of the bits represent the rate of gravity
-     *   2: Replication (sector 16711680)
-     *      0 0000000
-     *      Will only replicate when replication counter is non zero
-     *      First bit represents the direction of replication (bit representing a boolean)
-     *          when true it replicates down else up
-     *      The rest of the bits represents how much times to replicate (aka. replication counter)
-     *          The current cell will attempt to propagate into the direction as described in the second bit
-     *          The current cell is guaranteed to replicate once, and has a 10% to replicate twice and 1% to replicate thrice
-     *              If it cannot replicate twice or thrice it will replicate the lowest amount of times possible given the space
-     *              If there is not enough space to replicate it will move in the direction of replication and exchange places with cells of the same type
-     *          The replicated cell should inhert the same replication data with the excpetion that the times to replicate goes down by one
-     *          The original cell should also decrement its replication counter
+     *      The rest of the bits represent the rate of gravity as a fraction represented as 1/x such that the particle will move once every x frames
+     *   2: Metadata (sector 16711680)
+     *      00000000
+     *      storing data about the cell i guess. could be useful for keeping track of stuff
+     *      This value is represented as a byte
      *   3: Temperature (cause why not?) (sector 65280)
      *      00000000
      *      This is a byte (primative type). use it literally
@@ -51,13 +41,12 @@ public class Sketch extends PApplet {
      * 
      * Ticking order is as follows:
      *  Gravity
+     *  Misc
      *  Special Behaviour
-     *  Replication
      */
 
     public int brushRadius = 3;
     public long[][] canvas;  // x then y
-    public long[][] updateCanvas;  // x then y
 
     public int canvasWidth = 100;
     public int canvasHeight = 60;
@@ -76,7 +65,6 @@ public class Sketch extends PApplet {
     public void settings() {
         size(canvasWidth * sandSize, canvasHeight * sandSize);
         canvas = new long[canvasWidth][canvasHeight];
-        updateCanvas = canvas.clone();
     }
 
     @Override
@@ -91,7 +79,7 @@ public class Sketch extends PApplet {
         background(0);
 
         renderCells();
-        updateCellsCommonRules();
+        applyCellsCommonRules();
 
         // update
         // for (int x = canvasWidth - 1; x >= 0; x--) {
@@ -117,9 +105,6 @@ public class Sketch extends PApplet {
         fill(255);
         textAlign(LEFT, TOP);
         text(String.format("fps %d", (int)frameRate), 0, 0);
-
-        canvas = updateCanvas;
-        updateCanvas = new long[canvasWidth][canvasHeight];
     }
 
     @Override
@@ -141,51 +126,49 @@ public class Sketch extends PApplet {
         }
     }
 
-    public void updateCellsCommonRules() {
+    public void applyCellsCommonRules() {
         for (int x = 0; x < canvasWidth; x++) {
             for (int y = canvasHeight - 1; y >= 0; y--) {  // check from bottom of canvas to top
                 long cell = canvas[x][y];
                 if (getCellType(cell) == 0) continue;
 
                 int rules = getCellGeneralRules(cell);
-                int yOffset = cellCommonsGravityCalc((rules & -16777216) >>> 24, y);
-                if (yOffset != 0 && getCellType(updateCanvas[x][y + yOffset]) != EMPTY_CELL) yOffset = 0;
-                updateCanvas[x][y + yOffset] = canvas[x][y];
-
-                cellCommonsPerformReplication((rules & 16711680) >>> 16, x, y);
+                
+                cellCommonsApplyGravity((rules & -16777216) >>> 24, x, y);
+                cellCommonsMiscRules((rules & 255), x, y);
             }
         }
     }
 
-    public void cellCommonsPerformReplication(int rule, int x, int y) {
-        boolean shouldReplicateDown = ((rule & 128) >>> 7) == 1 ? true : false;
-        int yOffset = shouldReplicateDown ? 1 : 0;
-        int updatedReplicationCount = (rule & 127) - 1;
-
-        if (random(10) == 0) {  // duplicate twice
-            
-        } else if (random(100) == 0) {  // duplicate thrice
-
-        } else {  // duplicate once
-            if (getCellType(updateCanvas[x][y + yOffset]) != 0) return;
-            updateCanvas[x][y] = canvas[x][y] & 8323072;
-            updateCanvas[x][y + yOffset]
-        }
+    public void cellCommonsMiscRules(int rule, int x, int y) {
+    //     Can Shuffle;
+    //  *      Random Movement; (1/3 chance to move every frame, equal chance to mvoe in either direction)
+    //  *      Instantaneous Disintegration upon contact;
+    //  *      Destroy Adjacent; (depends on direction of movement)
+    //  *      
+    //  *      Triggerable;
+    //  *      Immovable;
+    //  *      Indestructible;
+    //  *      Volitile; (randomly implodes and explodes)
     }
 
-    public int cellCommonsGravityCalc(int rule, int yPos) {
+    public void cellCommonsApplyGravity(int rule, int x, int y) {
         boolean isFalling = ((rule & 128) >>> 7) == 1 ? true : false;
-        boolean isFractional = ((rule & 64) >>> 8) == 1 ? true : false;
-        int rateOfChange = rule & 63;
+        int rateOfChange = rule & 127;
+
+        int offset;
 
         if (isFalling) {
-            if (yPos == canvasHeight - 1) return 0;
-            if (!isFractional) return rateOfChange;
-            return (frameCount % rateOfChange) == 0 ? 1 : 0;
+            offset = y == canvasHeight - 1 ? 0 : rateOfChange;
         } else {  // going up
-            if (yPos == 0) return 0;
-            if (!isFractional) return -rateOfChange;
-            return (frameCount % rateOfChange) == 0 ? -1 : 0;
+            offset = y == 0 ? 0 : rateOfChange;
+        }
+
+        if (offset == 0) return;
+
+        if (frameCount % rateOfChange == 0 && canvas[x][y + offset] == 0) {
+            canvas[x][y + offset] = canvas[x][y];
+            canvas[x][y] = 0;
         }
     }
 
