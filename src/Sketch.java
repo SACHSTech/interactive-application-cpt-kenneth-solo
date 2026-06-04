@@ -92,8 +92,12 @@ public class Sketch extends PApplet {
         
         // TODO: get rid of hue and replace with something else
         int hue = count++ % 360;
-
-        canvas[mouseX][mouseY] = encodeCellData(color(hue, 100, 100), (byte)0, 1);
+        
+        for (int yOffset = -brushRadius; yOffset <= brushRadius; yOffset++) {
+            for (int xOffset = -brushRadius; xOffset <= brushRadius; xOffset++) {
+                canvas[Math.clamp(mouseX + xOffset, 0, canvasWidth - 1)][Math.clamp(mouseY + yOffset, 0, canvasHeight - 1)] = encodeCellData(color(hue, 100, 100), (byte)0, 1);
+            }
+        }
     }
 
     /** Additional helper methods below */
