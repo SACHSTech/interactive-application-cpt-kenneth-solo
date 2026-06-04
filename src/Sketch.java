@@ -14,10 +14,39 @@ public class Sketch extends PApplet {
      * Red, Green, Blue: Particle Color (mask is -1099511627776) (this channel can also support hsb)
      * Type: Particle Type (for special behaviour if applicable) (mask is 1095216660480)
      * General Rules: general particle rules (common behaviour) (mask is 4294967295)
-     *  Such that from the least significant bit (above diagram starting from the right going to the left):
-     *      1: fallable (gravity)
-     *      2: shuffle right if cell diaganolly below to its right is avalible
-     *      4: shuffle left if cell diaganolly below to its left is avalible
+     *  there are 4 sections (each 8 bits as inidcated above). starting with the left most section:
+     *   1: Gravity
+     *      0 0 000000
+     *      First bit represents direction of gravity (bit representing a boolean)
+     *          when true means down else up
+     *      Second bit represents if the rate is a fractional (bit representing a boolean)
+     *          when true the rest of the bits are used in the equation 1/x such that the particle will update once every x frames
+     *      The rest of the bits represent the rate of gravity
+     *   2: Replication
+     *      0 0 000000
+     *      First bit represents whether or not this cell will perform a replication (bit representing a boolean)
+     *      Second bit represents the direction of replication (bit representing a boolean)
+     *          when true it replicates down else up
+     *      The rest of the bits represents how much times to replicate (aka. replication counter)
+     *          The current cell will attempt to propagate into the direction as described in the second bit
+     *          The current cell is guaranteed to replicate once, and has a 10% to replicate twice and 1% to replicate thrice
+     *              The cell will only replicate when it has the space to do so
+     *              If there is not enough space to replicate it will move in the direction of replication and exchange places with cells of the same type
+     *          The replicated cell should inhert the same replication data with the excpetion that the times to replicate goes down by one
+     *          The original cell should also decrement its replication counter
+     *   3: Temperature (cause why not?)
+     *      00000000
+     *      This is a byte (primative type). use it literally
+     *   4: Misc (other stuff that are just random or useful idk, ive gotta fill in the rest of the flags somehow) (starting with the left most bit (128))
+     *      Can Shuffle;
+     *      Random Movement; (1/3 chance to move every frame, equal chance to mvoe in either direction)
+     *      Instantaneous Disintegration upon contact;
+     *      Destroy Adjacent; (depends on direction of movement)
+     *      
+     *      Triggerable;
+     *      Immovable;
+     *      Indestructible;
+     *      Volitile; (randomly implodes and explodes)
      */
 
     public int brushRadius = 3;
@@ -49,35 +78,29 @@ public class Sketch extends PApplet {
     @Override
     public void draw() {
         background(0);
-        
-        // render
-        noStroke();
-        for (int x = 0; x < canvasWidth; x++) {
-            for (int y = 0; y < canvasHeight; y++) {
-                fill(getCellColor(canvas[x][y]));
-                square(x * sandSize, y * sandSize, sandSize);
-            }
-        }
+
+        renderCells();
+        updateCellsCommonRules();
 
         // update
-        for (int x = canvasWidth - 1; x >= 0; x--) {
-            for (int y = canvasHeight - 1; y >= 0; y--) {
-                if (canvas[x][y] != 0 && canvas[x][Math.clamp(y + 1, 0, canvasHeight - 1)] == 0) {  // falling rule
-                    canvas[x][y + 1] = canvas[x][y];
-                    canvas[x][y] = 0;
-                } else if (canvas[x][y] != 0 && (canvas[x][Math.clamp(y - 1, 0, canvasHeight - 1)] == 0 || y == 0)) {  // shufflling rule
-                    if (y == canvasHeight - 1) continue;
+        // for (int x = canvasWidth - 1; x >= 0; x--) {
+        //     for (int y = canvasHeight - 1; y >= 0; y--) {
+        //         if (canvas[x][y] != 0 && canvas[x][Math.clamp(y + 1, 0, canvasHeight - 1)] == 0) {  // falling rule
+        //             canvas[x][y + 1] = canvas[x][y];
+        //             canvas[x][y] = 0;
+        //         } else if (canvas[x][y] != 0 && (canvas[x][Math.clamp(y - 1, 0, canvasHeight - 1)] == 0 || y == 0)) {  // shufflling rule
+        //             if (y == canvasHeight - 1) continue;
 
-                    if (x != canvasWidth - 1 && canvas[Math.clamp(x + 1, 0, canvasWidth - 1)][Math.clamp(y + 1, 0, canvasHeight - 1)] == 0) { // shuffle right
-                        canvas[x + 1][y + 1] = canvas[x][y];
-                        canvas[x][y] = 0;
-                    } else if (x != 0 && canvas[Math.clamp(x - 1, 0, canvasWidth - 1)][Math.clamp(y + 1, 0, canvasHeight - 1)] == 0) {  // shuffle left
-                        canvas[x - 1][y + 1] = canvas[x][y];
-                        canvas[x][y] = 0;
-                    }
-                }
-            }
-        } 
+        //             if (x != canvasWidth - 1 && canvas[Math.clamp(x + 1, 0, canvasWidth - 1)][Math.clamp(y + 1, 0, canvasHeight - 1)] == 0) { // shuffle right
+        //                 canvas[x + 1][y + 1] = canvas[x][y];
+        //                 canvas[x][y] = 0;
+        //             } else if (x != 0 && canvas[Math.clamp(x - 1, 0, canvasWidth - 1)][Math.clamp(y + 1, 0, canvasHeight - 1)] == 0) {  // shuffle left
+        //                 canvas[x - 1][y + 1] = canvas[x][y];
+        //                 canvas[x][y] = 0;
+        //             }
+        //         }
+        //     }
+        // } 
         
         // fps
         fill(255);
@@ -100,11 +123,25 @@ public class Sketch extends PApplet {
         }
     }
 
+    public void updateCellsCommonRules() {
+
+    }
+
+    public void renderCells() {
+        noStroke();
+        for (int x = 0; x < canvasWidth; x++) {
+            for (int y = 0; y < canvasHeight; y++) {
+                fill(getCellColor(canvas[x][y]));
+                square(x * sandSize, y * sandSize, sandSize);
+            }
+        }
+    }
+
     /** Additional helper methods below */
     public long encodeCellData(int color, byte type, int generalRules) {
-        return ((long)(color & 16777215) << 40)         // strip alpha channel from color (left side first 8 bits). shift 40 bits to the left
-            + ((long)(type) << 32)                      // shift type 32 bits left
-            + generalRules;                             // general rules and int uses 4 bytes (4 * 8 = 32; we used up the rest of the bits)
+        return ((color & 16777215L) << 40)              // strip alpha channel from color (left side first 8 bits). shift 40 bits to the left
+            | ((type & 255L) << 32)                     // shift type 32 bits left
+            | (generalRules & 4294967295L);             // general rules and int uses 4 bytes (4 * 8 = 32; we used up the rest of the bits)
     }
 
     public int getCellColor(long val) {
@@ -112,7 +149,7 @@ public class Sketch extends PApplet {
         // we must add back the alpha section so that processing can recognise the color (append 8 on bits to the left)
         //      this value is -16777216
 
-        return -16777216 + (int)((val & -1099511627776L) >>> 40);
+        return -16777216 | (int)((val & -1099511627776L) >>> 40);
     }
 
     public byte getCellType(long val) {
