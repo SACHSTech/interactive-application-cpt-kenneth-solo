@@ -31,46 +31,46 @@ public class Sketch extends PApplet {
      *   4: Misc (other stuff that are just random or useful idk, ive gotta fill in the rest of the flags somehow) (starting with the left most bit (128)) (sector 255 as int)
      *      Can Shuffle;
      *      Random Movement; (1/3 chance to move every frame, equal chance to mvoe in either direction)
-     *      Already Applied Gravity?
-     *      Has Ticked (to prevent special behaviour and certain misc from triggering again)
-     *      Triggerable;
+     *      Has Ticked?
+     *      Unused 1
+     *      Unused 2
      *      Immovable;
      *      Indestructible from outside causes;
      *      Is falling?
      * 
-     * Ticking order is as follows:
-     *  Gravity
-     *  Misc
-     *  Special Behaviour
+     * additional notes:
+     *      type -127 is reserved for cell type barrier floor
+     *      cells of the same type can exchange places if they are going in opposite directions
      */
 
-    public final long MASK_RGB =               Long.parseUnsignedLong("11111111 11111111 11111111 00000000 00000000 00000000 00000000 00000000".replace(" ", ""), 2);
+    public final long MASK_COLOR =             Long.parseUnsignedLong("11111111 11111111 11111111 00000000 00000000 00000000 00000000 00000000".replace(" ", ""), 2);
     public final long MASK_TYPE =              Long.parseUnsignedLong("00000000 00000000 00000000 11111111 00000000 00000000 00000000 00000000".replace(" ", ""), 2);
-    public final long MASK_GRAVITY_ENABLED =   Long.parseUnsignedLong("00000000 00000000 00000000 00000000 10000000 00000000 00000000 00000000".replace(" ", ""), 2);
-    public final long MASK_GRAVITY_MOVE_DOWN = Long.parseUnsignedLong("00000000 00000000 00000000 00000000 01000000 00000000 00000000 00000000".replace(" ", ""), 2);
+    public final long MASK_FALLING =           Long.parseUnsignedLong("00000000 00000000 00000000 00000000 10000000 00000000 00000000 00000000".replace(" ", ""), 2);
+    public final long MASK_FALLING_DOWN =      Long.parseUnsignedLong("00000000 00000000 00000000 00000000 01000000 00000000 00000000 00000000".replace(" ", ""), 2);
     public final long MASK_METADATA =          Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00111111 11111111 00000000 00000000".replace(" ", ""), 2);
     public final long MASK_TEMPERATURE =       Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 11111111 00000000".replace(" ", ""), 2);
 
     public final long MASK_SHUFFLE =           Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 10000000".replace(" ", ""), 2);
     public final long MASK_RAND_MOVE =         Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 01000000".replace(" ", ""), 2);
-    public final long MASK_TICKED_GRAV =       Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00100000".replace(" ", ""), 2);
-    public final long MASK_TICKED_MISC =       Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00010000".replace(" ", ""), 2);
-    public final long MASK_TRIGGERABLE =       Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00001000".replace(" ", ""), 2);
+    public final long MASK_TICKED =            Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00100000".replace(" ", ""), 2);
+    public final long MASK_UNUSED_1 =          Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00010000".replace(" ", ""), 2);
+    public final long MASK_UNUSED_2 =          Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00001000".replace(" ", ""), 2);
     public final long MASK_IMMOVABLE =         Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000100".replace(" ", ""), 2);
     public final long MASK_INDESTRUCTABLE =    Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000010".replace(" ", ""), 2);
-    public final long MASK_FALLING =           Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000001".replace(" ", ""), 2);
+    public final long MASK_UNUSED_3 =          Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000001".replace(" ", ""), 2);
 
     public int brushRadius = 3;
     public long[][] canvas;  // x then y
 
-    public int canvasWidth = 100 * 2;
-    public int canvasHeight = 60 * 2;
-    public int sandSize = 5;
+    public int canvasWidth = 100;
+    public int canvasHeight = 60;
+    public int sandSize = 10;
 
     // TODO: subjected for removal (temorary testing)
     public int count = 0;
 
-    public static final long EMPTY_CELL = 0;
+    public final long CELL_EMPTY = 0;
+    public final long CELL_BARRIER_FLOOR = encodeCellData(0, (byte)-128, (int)(MASK_IMMOVABLE | MASK_INDESTRUCTABLE));
 
     public static void main(String[] args) {
         PApplet.main("Sketch");
@@ -100,6 +100,20 @@ public class Sketch extends PApplet {
         // } else if (!keyPressed && waitingRelease) {
         //     waitingRelease = false;
         // }
+
+        // cell inspect
+        if (keyPressed && !waitingRelease) {
+            waitingRelease = true;
+            String cell = Long.toBinaryString(getCellSafe(this.mouseX / sandSize, this.mouseY / sandSize));
+            cell = " ".repeat(64 - cell.length()) + cell;
+            
+            for (int i = 0; i < 64; i += 8) {
+                System.out.print(cell.substring(i, i + 8) + " ");
+            }
+            System.out.println();
+        } else if (!keyPressed && waitingRelease) {
+            waitingRelease = false;
+        }
         
         // fps
         fill(255);
@@ -120,7 +134,8 @@ public class Sketch extends PApplet {
                 canvas[Math.clamp(mouseX + xOffset, 0, canvasWidth - 1)][Math.clamp(mouseY + yOffset, 0, canvasHeight - 1)] = encodeCellData(
                     color(hue, 100, 100),
                     (byte)1,
-                    (int)(MASK_GRAVITY_ENABLED | MASK_GRAVITY_MOVE_DOWN | MASK_SHUFFLE | MASK_FALLING)
+                    (int)(MASK_FALLING | MASK_FALLING_DOWN | MASK_SHUFFLE | MASK_FALLING)
+                        ^ (int)(count % 2 == 0 ? MASK_FALLING_DOWN : 0)
                 );
             }
         }
@@ -131,58 +146,63 @@ public class Sketch extends PApplet {
             for (int canvasY = 0; canvasY < canvasHeight; canvasY++) {
                 int cellX = canvasX;
                 int cellY = canvasY;
-
                 long cell = canvas[cellX][cellY];
-                if (cell == EMPTY_CELL) continue;
 
-                boolean isGravityDown = isBitEnabled(cell, MASK_GRAVITY_MOVE_DOWN);
-                int moveDirection = isGravityDown ? 1 : -1;
+                if (cell == CELL_EMPTY || isBitEnabled(cell, MASK_TICKED)) continue;
+                canvas[cellX][cellY] = cell |= MASK_TICKED;
 
-                if (!isBitEnabled(cell, MASK_TICKED_GRAV) && isBitEnabled(cell, MASK_GRAVITY_ENABLED)) {  // check if gravity has already been applied
-                    canvas[cellX][cellY] = cell |= MASK_TICKED_GRAV;
-                    cellY += cellCommonsApplyGravity(isGravityDown, cellX, cellY);
+                boolean isFallingDown = isBitEnabled(cell, MASK_FALLING_DOWN);
+                int moveDirection = isFallingDown ? 1 : -1;
+                long cellAhead = getCellSafe(cellX, cellY + moveDirection);
+
+                if (
+                    cellAhead != CELL_BARRIER_FLOOR
+                    && (cellAhead == CELL_EMPTY || isBitEnabled(cellAhead, MASK_FALLING))
+                ) {
+                    canvas[cellX][cellY] = cell |= MASK_FALLING;  // start falling
+                } else {
+                    canvas[cellX][cellY] = cell &= ~MASK_FALLING;  // stop falling
                 }
 
-                if (!isBitEnabled(cell, MASK_TICKED_MISC)) {  // check if cell has already been ticked by misc
-                    canvas[cellX][cellY] = cell |= MASK_TICKED_MISC;
-                    boolean allowShuffle = !isBitEnabled(cell, MASK_FALLING)
-                                            || (
-                                                !isHeightOutOfBounds(cellY + moveDirection)
-                                                && isBitEnabled(canvas[cellX][cellY + moveDirection], MASK_GRAVITY_MOVE_DOWN) != isGravityDown
-                                            );
+                boolean allowShuffle = !isBitEnabled(cell, MASK_FALLING)
+                                        || !isBitEnabled(cellAhead, MASK_FALLING)
+                                        || isBitEnabled(cellAhead, MASK_FALLING_DOWN) != isFallingDown;
 
-                    long updatedPos = cellCommonsMiscRules(cell, cellX, cellY, moveDirection, allowShuffle);
-                    cellX = (int)(updatedPos >>> 32);
-                    cellY = (int)(updatedPos & Integer.MAX_VALUE);
+                long updatedPos = cellCommonsMiscRules(cell, cellX, cellY, moveDirection, allowShuffle);
+                cellX = (int)(updatedPos >>> 32);
+                cellY = (int)(updatedPos & Integer.MAX_VALUE);
+                
+                // we will know if it had shuffled if it moved on the x axis
+                if (cellX == canvasX) {
+                    if (isBitEnabled(cell, MASK_FALLING)) {
+                        cellY += cellCommonsApplyGravity(isFallingDown, cellX, cellY);
+                    }
 
-                    if (isHeightOutOfBounds(cellY + moveDirection)) {
-                        canvas[cellX][cellY] = cell &= ~MASK_FALLING;
-                    } else if (canvas[cellX][cellY + moveDirection] != EMPTY_CELL) {
-                        if (isBitEnabled(canvas[cellX][cellY + moveDirection], MASK_FALLING)) {
-                            canvas[cellX][cellY] = cell |= MASK_FALLING;
-                        } else {
-                            canvas[cellX][cellY] = cell &= ~MASK_FALLING;
-                        }
+                    // exchange rule: allow swapping places if the cell ahead is the same type and moving in the opposing direction
+                    if (cellY == canvasY && isBitEnabled(cellAhead, MASK_FALLING) && isBitEnabled(cellAhead, MASK_FALLING_DOWN) != isFallingDown) {
+                        
                     }
                 }
 
-                if (canvas[cellX][cellY] == EMPTY_CELL) continue;
                 // TODO: apply special behaviour
             }
         }
 
         // reset gravity flag and ticked flag
-        long resetFlag = MASK_TICKED_GRAV | MASK_TICKED_MISC;
+        // TODO: possible performance fix
+        //       Instead of iterating this again we can just have a boolean to check whether
+        //       or not this iteration should check for an on or off bit in MASK_TICKED
+        //       and then inverting the boolean variable for the next iteration
+        long resetFlag = ~MASK_TICKED;
         for (int x = 0; x < canvasWidth; x++) {
             for (int y = 0; y < canvasHeight; y++) {
-                long cell = canvas[x][y];
-                canvas[x][y] ^= (cell & resetFlag);
+                canvas[x][y] &= resetFlag;
             }
         }
     }
 
     /**
-     * Applies Misc Rules. CAUTION: this function will update the canvas!
+     * Applies Misc Rules. CAUTION: this function will update the canvas! NOTE: no cell is deleted in this process
      * @param cell cell data
      * @param x cell x on canvas
      * @param y cell y on canvas
@@ -192,32 +212,21 @@ public class Sketch extends PApplet {
      *         <br> Use a bitwise mask to access the value {@code x = (int)(res >>> 32);} {@code y = (int)(res & Integer.MAX_VALUE)}
      */
     public long cellCommonsMiscRules(long cell, int x, int y, int moveDirection, boolean allowShuffle) {
-        if (isBitEnabled(cell, MASK_SHUFFLE) && allowShuffle) {  // Can Shuffle
-            if (
-                !isHeightOutOfBounds(y + moveDirection)             // ensure it cannot move off the screen vertically
-                && canvas[x][y + moveDirection] != EMPTY_CELL       // only can shuffle if the space below or above occupied
-            ) {
-                if ((x + 1) != canvasWidth && canvas[x + 1][y + moveDirection] == EMPTY_CELL) {
-                    moveRelative(x, y, 1, moveDirection);
-    
-                    y += moveDirection;
-                    x++;
-                } else if ((x - 1) != -1 && canvas[x - 1][y + moveDirection] == EMPTY_CELL) {
-                    moveRelative(x, y, -1, moveDirection);
-
-                    y += moveDirection;
-                    x--;
-                }
+        if (allowShuffle && isBitEnabled(cell, MASK_SHUFFLE) && getCellSafe(x, y + moveDirection) != CELL_EMPTY) {  // Can Shuffle
+            if (moveRelative(x, y, 1, moveDirection)) {
+                y += moveDirection;
+                x++;
+            } else if (moveRelative(x, y, -1, moveDirection)) {
+                y += moveDirection;
+                x--;
             }
         }
 
         if (isBitEnabled(cell, MASK_RAND_MOVE) && random(3) == 0) {  // Random Movement; (1/3 chance to move every frame, equal chance to mvoe in either direction)
-            boolean moveLeft = random(2) == 0;
-            if (moveLeft && x != 0 && canvas[x - 1][y] == EMPTY_CELL) {
-                moveRelative(x, y, -1, 0);
+            boolean chooseLeft = random(2) == 0;
+            if (chooseLeft && moveRelative(x, y, -1, 0)) {
                 x--;
-            } else if (x != canvasWidth - 1 && canvas[x + 1][y] == EMPTY_CELL) {
-                moveRelative(x, y, 1, 0);
+            } else if (moveRelative(x, y, 1, 0)) {
                 x++;
             }
         }
@@ -226,16 +235,14 @@ public class Sketch extends PApplet {
     }
 
     /**
-     * Applies gravity to the affected cell. CAUTION: this function will update the canvas!
-     * @param isGravityDown true if gravity is heading down else false for going up
+     * Applies gravity to the affected cell. CAUTION: this function will update the canvas! NOTE: no cell is deleted in this process
+     * @param isFallingDown true if gravity is heading down else false for going up
      * @param x cell x coords in the canvas
      * @param y cell y coords in the canvas
      * @return returns where the cell was offseted (up -1 or down 1)
      */
-    public int cellCommonsApplyGravity(boolean isGravityDown, int x, int y) {
-        int offset = isGravityDown ? 1 : -1;
-
-        if (isHeightOutOfBounds(y + offset)) return 0;
+    public int cellCommonsApplyGravity(boolean isFallingDown, int x, int y) {
+        int offset = isFallingDown ? 1 : -1;
         boolean moved = moveRelative(x, y, 0, offset);
         return moved ? offset : 0;
     }
@@ -244,21 +251,49 @@ public class Sketch extends PApplet {
         return (value & enabledFlags) == enabledFlags;
     }
 
-    public boolean isHeightOutOfBounds(int y) {
+    public boolean isYOutOfBounds(int y) {
         return y < 0 || y >= canvasHeight;
     }
 
+    /**
+     * Moves the cell from x, y to targetX, targetY. NOTE: function is aware of the canvas boundaries
+     * @param x
+     * @param y
+     * @param targetX
+     * @param targetY
+     * @return true if successfully moved the cell, false otherwise
+     */
     public boolean moveAbsolute(int x, int y, int targetX, int targetY) {
-        if (canvas[targetX][targetY] != EMPTY_CELL) return false;
+        if (getCellSafe(targetX, targetY) != CELL_EMPTY) return false;
 
         canvas[targetX][targetY] = canvas[x][y];
-        canvas[x][y] = EMPTY_CELL;
+        canvas[x][y] = CELL_EMPTY;
 
         return true;
     }
 
+    /**
+     * Moves the cell relative to x, y given relX, relY. NOTE: function is aware of the canvas boundaries
+     * @param x
+     * @param y
+     * @param relX
+     * @param relY
+     * @return true if successfully moved the cell, false otherwise
+     */
     public boolean moveRelative(int x, int y, int relX, int relY) {
         return moveAbsolute(x, y, x + relX, y + relY);
+    }
+
+    /**
+     * Get cell at x, y; if the coordinates are unreachable, {@link #CELL_BARRIER_FLOOR} will be return instead
+     * @param x cell x position
+     * @param y cell y position
+     * @return the cell's value or {@link #CELL_BARRIER_FLOOR}
+     */
+    public long getCellSafe(int x, int y) {
+        if (isYOutOfBounds(y)) return CELL_BARRIER_FLOOR;
+        if (x < 0 || x >= canvasWidth) return CELL_BARRIER_FLOOR;
+        return canvas[x][y];
     }
 
     public void renderCells() {
@@ -273,9 +308,9 @@ public class Sketch extends PApplet {
 
     /** Additional helper methods below */
     public long encodeCellData(int color, byte type, int generalRules) {
-        return (Integer.toUnsignedLong(color & 16777215) << 40)              // strip alpha channel from color (left side first 8 bits). shift 40 bits to the left
+        return (Integer.toUnsignedLong(color & 16777215) << 40)     // strip alpha channel from color (left side first 8 bits). shift 40 bits to the left
             | (Byte.toUnsignedLong(type) << 32)                     // shift type 32 bits left
-            | Integer.toUnsignedLong(generalRules);             // general rules and int uses 4 bytes (4 * 8 = 32; we used up the rest of the bits)
+            | Integer.toUnsignedLong(generalRules);                 // general rules and int uses 4 bytes (4 * 8 = 32; we used up the rest of the bits)
     }
 
     public int getCellColor(long val) {
@@ -283,36 +318,10 @@ public class Sketch extends PApplet {
         // we must add back the alpha section so that processing can recognise the color (append 8 on bits to the left)
         //      this value is -16777216
 
-        return -16777216 | (int)((val & -1099511627776L) >>> 40);
+        return -16777216 | (int)((val & MASK_COLOR) >>> 40);
     }
 
     public byte getCellType(long val) {
-        return (byte)((val & 1095216660480L) >>> 32);
+        return (byte)((val & MASK_TYPE) >>> 32);
     }
 }
-
-// parsing test cases
-//      System.out.println(Long.parseUnsignedLong("11111111 11111111 11111111 00000000 00000000 00000000 00000000 00000000".replace(" ", ""), 2));
-//      System.out.println(Long.parseUnsignedLong("00000000 00000000 00000000 11111111 00000000 00000000 00000000 00000000".replace(" ", ""), 2));
-//      System.out.println(Long.parseUnsignedLong("00000000 00000000 00000000 00000000 11111111 11111111 11111111 11111111".replace(" ", ""), 2));
-
-//      System.out.println();
-
-//      System.out.println("color");
-//      System.out.println(Long.toBinaryString(encodeCellData(color(128, 128, 128), (byte)85, -1431655766)));
-//      System.out.println(getCellColor(encodeCellData(color(128, 128, 128), (byte)85, -1431655766)));
-//      System.out.println(color(128, 128, 128));
-
-//      System.out.println();
-
-//      System.out.println("type");
-//      System.out.println(Long.toBinaryString(encodeCellData(color(128, 128, 128), (byte)85, -1431655766)));
-//      System.out.println(getCellType(encodeCellData(color(128, 128, 128), (byte)85, -1431655766)));
-//      System.out.println(85);
-
-//      System.out.println();
-
-//      System.out.println("general rules");
-//      System.out.println(Long.toBinaryString(encodeCellData(color(128, 128, 128), (byte)85, -1431655766)));
-//      System.out.println(getCellGeneralRules(encodeCellData(color(128, 128, 128), (byte)85, -1431655766)));
-//      System.out.println(-1431655766);
