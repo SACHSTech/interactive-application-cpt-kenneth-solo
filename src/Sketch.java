@@ -59,12 +59,12 @@ public class Sketch extends PApplet {
     public final long MASK_INDESTRUCTABLE =    Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000010".replace(" ", ""), 2);
     public final long MASK_UNUSED_3 =          Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000001".replace(" ", ""), 2);
 
-    public int brushRadius = 3;
+    public int brushRadius = 2;
     public long[][] canvas;  // x then y
 
-    public int canvasWidth = 100;
-    public int canvasHeight = 60;
-    public int sandSize = 10;
+    public int canvasWidth = 100 * 2;
+    public int canvasHeight = 60 * 2;
+    public int sandSize = 5;
 
     // TODO: subjected for removal (temorary testing)
     public int count = 0;
@@ -171,16 +171,19 @@ public class Sketch extends PApplet {
                 long updatedPos = cellCommonsMiscRules(cell, cellX, cellY, moveDirection, allowShuffle);
                 cellX = (int)(updatedPos >>> 32);
                 cellY = (int)(updatedPos & Integer.MAX_VALUE);
-                
+                cellAhead = getCellSafe(cellX, cellY + moveDirection);
+                                                                                                            
                 // we will know if it had shuffled if it moved on the x axis
                 if (cellX == canvasX) {
-                    if (isBitEnabled(cell, MASK_FALLING)) {
-                        cellY += cellCommonsApplyGravity(isFallingDown, cellX, cellY);
-                    }
+                    if (isBitEnabled(cell, MASK_FALLING)) cellY += cellCommonsApplyGravity(isFallingDown, cellX, cellY);
 
                     // exchange rule: allow swapping places if the cell ahead is the same type and moving in the opposing direction
-                    if (cellY == canvasY && isBitEnabled(cellAhead, MASK_FALLING) && isBitEnabled(cellAhead, MASK_FALLING_DOWN) != isFallingDown) {
-                        
+                    // only apply when we have moved vertically. in addition to the condition for the exchange rule the cell must
+                    //      have not moved vertically yet and that the cell ahead is not a barrier floor
+                    if (cellAhead != CELL_BARRIER_FLOOR && cellY == canvasY && isBitEnabled(cellAhead, MASK_FALLING) && isBitEnabled(cellAhead, MASK_FALLING_DOWN) != isFallingDown) {
+                        long temp = canvas[cellX][cellY];
+                        canvas[cellX][cellY] = canvas[cellX][cellY + moveDirection];
+                        canvas[cellX][cellY + moveDirection] = temp;
                     }
                 }
 
