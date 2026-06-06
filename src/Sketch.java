@@ -1,3 +1,5 @@
+import java.util.HashMap;
+
 import processing.core.PApplet;
 import processing.event.MouseEvent;
 
@@ -20,30 +22,39 @@ public class Sketch extends PApplet {
      *      storing data about the cell i guess. could be useful for keeping track of stuff
      *      This value is represented as a byte
      * State and Rules (aka. flags) (the state of the cell and some rules that all cells probably have in common)
-     *      See below for misc flags. start at {@link #MASK_SHUFFLE}
-     * 
+     *      See below for misc flags. start at {@link #MASK_CAN_SHUFFLE}
+ * 
      * additional notes:
      *      cells of the same type can exchange places if they are going in opposite directions
      */
 
-    public final long MASK_COLOR =            Long.parseUnsignedLong("11111111 11111111 11111111 00000000 00000000 00000000 00000000 00000000".replace(" ", ""), 2);
-    public final long MASK_TYPE =             Long.parseUnsignedLong("00000000 00000000 00000000 11111111 00000000 00000000 00000000 00000000".replace(" ", ""), 2);
-    public final long MASK_METADATA =         Long.parseUnsignedLong("00000000 00000000 00000000 00000000 11111111 11111111 11111111 00000000".replace(" ", ""), 2);
+    public final long MASK_COLOR =             Long.parseUnsignedLong("11111111 11111111 11111111 00000000 00000000 00000000 00000000 00000000".replace(" ", ""), 2);
+    public final long MASK_TYPE =              Long.parseUnsignedLong("00000000 00000000 00000000 11111111 00000000 00000000 00000000 00000000".replace(" ", ""), 2);
+    public final long MASK_METADATA =          Long.parseUnsignedLong("00000000 00000000 00000000 00000000 11111111 11111111 11111111 00000000".replace(" ", ""), 2);
 
-    public final long MASK_TICKED =           Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 10000000".replace(" ", ""), 2);
-    public final long MASK_TARGET_ANY_SWAP =  Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 01000000".replace(" ", ""), 2);
-    public final long MASK_UNSUED_1 =         Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00100000".replace(" ", ""), 2);
-    public final long MASK_FALLING_UP =       Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00010000".replace(" ", ""), 2);
-    public final long MASK_INDESTRUCTABLE =   Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00001000".replace(" ", ""), 2);
-    public final long MASK_CANT_FALL =        Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000100".replace(" ", ""), 2);
-    public final long MASK_OTHERS_CANT_MOVE = Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000010".replace(" ", ""), 2);
-    public final long MASK_SHUFFLE =          Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000001".replace(" ", ""), 2);
+    /** has this cell ticked this iteration yet? */
+    public final long MASK_TICKED =            Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 10000000".replace(" ", ""), 2);
+    /** this cell can swap positions with other cells who ask */
+    public final long MASK_CAN_SWAP_WITH_ANY = Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 01000000".replace(" ", ""), 2);
+    /** this cell cant swap with a target cell. However a target cell CAN swap to this cell (i.e. this cell can't move on its own) */
+    public final long MASK_SELF_CANT_SWAP =    Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00100000".replace(" ", ""), 2);
+    /** this cell wants to swap upwards (by default they will swap down) */
+    public final long MASK_SWAP_UP =           Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00010000".replace(" ", ""), 2);
+    /** this cell cant be destroyed unless the user destroys it */
+    public final long MASK_INDESTRUCTABLE =    Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00001000".replace(" ", ""), 2);
+    public final long MASK_UNSUED_1 =          Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000100".replace(" ", ""), 2);
+    /** other cells can shuffle on this cell */
+    public final long MASK_OTHERS_SHUFFLE_ON = Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000010".replace(" ", ""), 2);
+    /** this cell can shuffle */
+    public final long MASK_CAN_SHUFFLE =       Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000001".replace(" ", ""), 2);
 
-    public final long MASKC_NATURALLY_IMMOVABLE = MASK_CANT_FALL | MASK_OTHERS_CANT_MOVE;
-    public final long MASKC_FLOATING_DISPLACEABLE = MASK_CANT_FALL | MASK_TARGET_ANY_SWAP;
+    public final long MASKC_NATURALLY_IMMOVABLE = MASK_SELF_CANT_SWAP | MASK_OTHERS_SHUFFLE_ON;
+    public final long MASKC_FLOATING_DISPLACEABLE = MASK_SELF_CANT_SWAP | MASK_CAN_SWAP_WITH_ANY;
 
     public int brushRadius = 2;
     public long[][] canvas;  // x then y
+
+    public HashMap<Byte, String> specialBehaviours = new HashMap<>();
 
     public int canvasWidth = 100 * 2;
     public int canvasHeight = 60 * 2;
@@ -53,7 +64,7 @@ public class Sketch extends PApplet {
     public int count = 0;
 
     public final long CELL_AIR = cellEncodeData(color(0), (byte)0, 0, (byte)(MASKC_FLOATING_DISPLACEABLE));
-    public final long CELL_BARRIER_FLOOR = cellEncodeData(color(0), (byte)-128, 0, (byte)(MASK_INDESTRUCTABLE | MASKC_NATURALLY_IMMOVABLE));
+    public final long CELL_BARRIER_FLOOR = cellEncodeData(color(0), (byte)-128, 0, (byte)(MASK_INDESTRUCTABLE | MASKC_NATURALLY_IMMOVABLE | MASK_TICKED));
 
     public static void main(String[] args) {
         PApplet.main("Sketch");
@@ -83,7 +94,7 @@ public class Sketch extends PApplet {
 
         cellRender();
         cellApplyRuleBehaviours();
-
+        
         // cell inspect
         if (keyPressed && !waitingRelease) {
             waitingRelease = true;
@@ -116,11 +127,12 @@ public class Sketch extends PApplet {
             for (int xOffset = -brushRadius; xOffset <= brushRadius; xOffset++) {
                 canvas[Math.clamp(mouseX + xOffset, 0, canvasWidth - 1)][Math.clamp(mouseY + yOffset, 0, canvasHeight - 1)] = cellEncodeData(
                     color(hue, 100, 100),
-                    (byte)1,
+                    (byte)(keyPressed && keyCode == CONTROL ? 2 : 1),
                     0,
-                    (byte)((MASK_SHUFFLE)
-                        ^ (count % 2 == 0 ? MASK_FALLING_UP : 0))
-                );
+                    (byte)((MASK_CAN_SHUFFLE)
+                    | (count % 2 == 0 ? MASK_SWAP_UP : 0)
+                    | (keyPressed && keyCode == CONTROL ? MASKC_NATURALLY_IMMOVABLE : 0)
+                ));
             }
         }
     }
@@ -133,11 +145,6 @@ public class Sketch extends PApplet {
             }
         }
 
-        // reset gravity flag and ticked flag
-        // TODO: possible performance fix
-        //       Instead of iterating this again we can just have a boolean to check whether
-        //       or not this iteration should check for an on or off bit in MASK_TICKED
-        //       and then inverting the boolean variable for the next iteration
         long resetFlag = ~MASK_TICKED;
         for (int x = 0; x < canvasWidth; x++) {
             for (int y = 0; y < canvasHeight; y++) {
@@ -149,24 +156,21 @@ public class Sketch extends PApplet {
     public void cellTick(long cell, int x, int y, boolean canMove) {
         canvas[x][y] |= MASK_TICKED;
 
-        boolean isFallingUp = cellIsFlagOn(cell, MASK_FALLING_UP);
-        int fallDirection = isFallingUp ? -1 : 1;
-        // long cellAhead = cellAtXYSafe(x, y + fallDirection);
-
         if (canMove) {
-            if (cellCommonsApplyGravity(cell, x, y)) y++;
-
-            // long updatedPos = cellApplyShuffling(cell, x, y, fallDirection);
-            // x = (int)(updatedPos >>> 32);
-            // y = (int)(updatedPos & Integer.MAX_VALUE);
-            // cellAhead = cellAtXYSafe(x, y + fallDirection);
+            if (cellCommonsApplyGravity(cell, x, y)) {
+                y++;
+            } else if (cellIsFlagOn(cell, MASK_CAN_SHUFFLE)) {
+                long updatedPos = cellApplyShuffling(cell, x, y);
+                x = (int)(updatedPos >>> 32);
+                y = (int)(updatedPos & Integer.MAX_VALUE);
+            }
         }
 
         // TODO: apply special behaviour
     }
 
     /**
-     * Cells will "shuffle". i.e. Move out of the way or move down and over. CAUTION: this function will update the canvas!
+     * Apply cell shuffling. CAUTION: this function will update the canvas!
      * @param cell cell data
      * @param x cell x on canvas
      * @param y cell y on canvas
@@ -174,27 +178,52 @@ public class Sketch extends PApplet {
      * @return updated x and y coordinates. 32bits on the left is the x coordinates as int, and 32bits on the right is y coordinates as int
      *         <br> Use a bitwise mask to access the value {@code x = (int)(res >>> 32);} {@code y = (int)(res & Integer.MAX_VALUE)}
      */
-    public long cellApplyShuffling(long cell, int x, int y, int direction) {
-        // boolean allowShuffle = !cellIsFlagOn(cell, MASK_CHAIN_FALLING_UP)
-                                // || !cellIsFlagOn(cellAhead, MASK_CHAIN_FALLING_UP)
-                                // || cellIsFlagOn(cellAhead, MASK_FALLING_UP) != isFallingUp;
+    public long cellApplyShuffling(long cell, int x, int y) {
+        int direction = cellSwapDirection(cell);
+        if (direction == 0 || cellIsFlagOn(cell, MASK_SELF_CANT_SWAP)) return ((long)x << 32) | y;
         long cellAhead = cellAtXYSafe(x, y + direction);
 
-        if (
-            cellIsFlagOn(cell, MASK_SHUFFLE)
-            && (
-                !cellIsFlagOn(cell, MASK_CHAIN_FALLING_UP)
-                || cellIsFlagOn(cellAhead, MASK_OTHERS_CANT_MOVE)
-                || (cellIsFlagOn(cellAhead, MASK_FALLING_UP) ? -1 : 1) != direction
-            )
-        ) {
-            if (cellMoveRelative(x, y, 1, direction, true)) {
-                y += direction;
+        // shuffle rule:
+        //      if the cell ahead hasnt ticked do it before attempting to shuffle
+        //      you must shuffle on a surface that permits you to do so
+        //      if you are unable to shuffle. you are prob on a still surface. permit others to shuffle on you
+        //      you must yield to cells that are moving into your shuffling position
+        //      the cell you are shuffling towards must be able to exchange with anyone
+        //      cells that you must pass thru to get to your shuffled position (left or right, then up or down),
+        //          must be of same type or can be freely swapped with
+
+        if (!cellIsFlagOn(cellAhead, MASK_TICKED)) {
+            cellTick(cellAhead, x, y + direction, true);
+            cellAhead = cellAtXYSafe(x, y + direction);
+        }
+
+        if (cellIsFlagOn(cellAhead, MASK_OTHERS_SHUFFLE_ON)) {
+            int targetY = y + direction;
+            long cellLeft = cellAtXYSafe(x - 1, y);
+            long cellRight = cellAtXYSafe(x + 1, y);
+
+            // yield to cells that are already going towards your target
+            if (
+                cellIsFlagOn(cellAtXYSafe(x + 1, targetY), MASK_CAN_SWAP_WITH_ANY)
+                && (cellIsFlagOn(cellRight, MASK_CAN_SWAP_WITH_ANY) || cellGetType(cell) == cellGetType(cellRight))
+                && cellSwapDirection(cellRight) != direction
+                && cellMoveRelative(x, y, 1, direction)
+            ) {
                 x++;
-            } else if (cellMoveRelative(x, y, -1, direction, true)) {
                 y += direction;
+            } else if (
+                cellIsFlagOn(cellAtXYSafe(x - 1, targetY), MASK_CAN_SWAP_WITH_ANY)
+                && (cellIsFlagOn(cellLeft, MASK_CAN_SWAP_WITH_ANY) || cellGetType(cell) == cellGetType(cellLeft))
+                && cellSwapDirection(cellLeft) != direction
+                && cellMoveRelative(x, y, -1, direction)
+            ) {
                 x--;
+                y += direction;
+            } else {
+                canvas[x][y] |= MASK_OTHERS_SHUFFLE_ON;
             }
+        } else {
+            canvas[x][y] &= ~MASK_OTHERS_SHUFFLE_ON;
         }
 
         return ((long)x << 32) | y;
@@ -208,28 +237,58 @@ public class Sketch extends PApplet {
      * @return true when the cell moved down
      */
     public boolean cellCommonsApplyGravity(long cell, int x, int y) {
-        boolean fallingUp = cellIsFlagOn(cell, MASK_FALLING_UP);
-        int fallDirection = fallingUp ? -1 : 1;
-        long cellAhead = cellAtXYSafe(x, y + fallDirection);
+        int cellDirection = cellSwapDirection(cell);
+        long cellBelow = cellAtXYSafe(x, y + 1);
+        int cellBelowDirection = cellSwapDirection(cellBelow);
+        int netDirection = cellDirection + cellBelowDirection;
 
-        // exchange rule: can swap place if
-        //                  either one of them can fall
-        //                  both have to be moveable by others
-        //                  same type going in opposite directions OR either one has any swap
-        if (cellIsFlagOn(cell & cellAhead, MASK_CANT_FALL)) return false;          // at least one has to fall
-        if (cellIsFlagOn(cell | cellAhead, MASK_OTHERS_CANT_MOVE)) return false;   // both have to be moveable
-        if (cellIsFlagOn(cellAhead, MASK_TICKED)) return false;                    // cannot move ticked cells
+        if (cellIsFlagOn(cell & cellBelow, MASK_SELF_CANT_SWAP)) return false;
+        if (Math.abs(netDirection) == 2) return false;
+        if (cellIsFlagOn(cellBelow, MASK_TICKED)) return false;
         
-        // one or more is falling
-        // both can be moved
-        // they are either moving apart or moving towards
-        // there is either 1 or no displaceables
-        if (cellIsFlagOn(cell, MASKC_FLOATING_DISPLACEABLE) && cellIsFlagOn(cellAhead, MASK_FALLING_UP)) return cellMoveRelative(x, y, 0, 1, true);
-        if (!cellIsFlagOn(cell, MASK_FALLING_UP) && cellIsFlagOn(cellAhead, MASKC_FLOATING_DISPLACEABLE)) return cellMoveRelative(x, y, 0, 1, true);
-        boolean sameType = cellGetType(cell) == cellGetType(cellAhead);
-        if (sameType && (!cellIsFlagOn(cell, MASK_FALLING_UP) && cellIsFlagOn(cellAhead, MASK_FALLING_UP))) return cellMoveRelative(x, y, 0, 1, true);
+        boolean sameType = cellGetType(cell) == cellGetType(cellBelow);
+        if (
+            sameType
+            && Math.abs(netDirection) == 0 && cellIsFlagOn(cellBelow, MASK_SWAP_UP)
+            && !cellIsFlagOn(cell | cellBelow, MASK_SELF_CANT_SWAP)
+        ) {
+            return cellMoveRelative(x, y, 0, 1);
+        } else if (
+            Math.abs(netDirection) == 1
+            && (
+                (cellIsFlagOn(cell, MASK_CAN_SWAP_WITH_ANY) && cellBelowDirection == -1)
+                || (cellDirection == 1 && cellIsFlagOn(cellBelow, MASK_CAN_SWAP_WITH_ANY))
+            )
+        ) {
+            return cellMoveRelative(x, y, 0, 1);
+        }
 
         return false;
+    }
+
+    /**
+     * Removes the cell on the canvas (i.e replaces it with air). if {@link #MASK_INDESTRUCTABLE} is set then the cell cant be removed unless the user requested it to be destroyed
+     * @param x cell x position
+     * @param y cell y position
+     * @param userRequested if true then the cell will be removed even with {@link #MASK_INDESTRUCTABLE}, else the cell can persist if that mask is set
+     * @return true if it was removed successfully, otherwise false
+     */
+    public boolean cellRemove(int x, int y, boolean userRequested) {
+        if (x < 0 || x >= canvasWidth || isYOutOfBounds(y)) return false;
+        if (cellIsFlagOn(canvas[x][y], MASK_INDESTRUCTABLE) && !userRequested) return false;
+        
+        canvas[x][y] = CELL_AIR;
+        return true;
+    }
+
+    /**
+     * Get the direction that the cell wants to swap towards. If cell has {@link #MASK_SELF_CANT_SWAP} then return is 0
+     * @param cell
+     * @return 1 if going down, -1 is going up, 0 if {@link #MASK_SELF_CANT_SWAP} is enabled
+     */
+    public int cellSwapDirection(long cell) {
+        if (cellIsFlagOn(cell, MASK_SELF_CANT_SWAP)) return 0;
+        return cellIsFlagOn(cell, MASK_SWAP_UP) ? -1 : 1;
     }
 
     public boolean cellIsFlagOn(long cell, long enabledFlags) {
@@ -263,42 +322,28 @@ public class Sketch extends PApplet {
     }
 
     /**
-     * swap two cells. will fail if target has the following mask: {@link #MASK_OTHERS_CANT_MOVE}.
+     * swap two cells. will fail if target has the following mask: {@link #MASK_OTHERS_CANT_SWAP}.
      *      <br> NOTE: this function will only check if the target exists. it assumes that (x, y) are valid coordinates
      * @param x
      * @param y
      * @param targetX
      * @param targetY
-     * @param onlyTickOnce if true it will tick if the target has not ticked yet. if false, will always tick target
      * @return true if the swap was successful, false otherwise
      */
-    public boolean cellMoveAbsolute(int x, int y, int targetX, int targetY, boolean onlyTickOnce) {
+    public boolean cellMoveAbsolute(int x, int y, int targetX, int targetY) {
         long inital = canvas[x][y];
         long target = cellAtXYSafe(targetX, targetY);
-        if (cellIsFlagOn(target, MASK_OTHERS_CANT_MOVE)) return false;
         
         canvas[x][y] = target;
         canvas[targetX][targetY] = inital;
 
-        if (onlyTickOnce) {
-            if (!cellIsFlagOn(target, MASK_TICKED)) cellTick(target, x, y, false);
-        } else {
-            cellTick(target, x, y, false);
-        }
+        if (!cellIsFlagOn(target, MASK_TICKED)) cellTick(target, x, y, false);
 
         return true;
     }
 
-    public boolean cellMoveRelative(int x, int y, int relX, int relY, boolean onlyTickOnce) {
-        return cellMoveAbsolute(x, y, x + relX, y + relY, onlyTickOnce);
-    }
-
-    public boolean cellMoveAbsolute(int x, int y, int targetX, int targetY) {
-        return cellMoveAbsolute(x, y, targetX, targetY, true);
-    }
-
     public boolean cellMoveRelative(int x, int y, int relX, int relY) {
-        return cellMoveAbsolute(x, y, x + relX, y + relY, true);
+        return cellMoveAbsolute(x, y, x + relX, y + relY);
     }
 
     /** Additional helper methods below */
