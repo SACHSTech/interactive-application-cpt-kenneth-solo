@@ -1,7 +1,11 @@
 import java.util.HashMap;
 
 import processing.core.PApplet;
+import processing.core.PFont;
+import processing.core.PShape;
 import processing.event.MouseEvent;
+
+// TODO: https://fonts.google.com/noto/specimen/Noto+Emoji source font
 
 /**
  * Sand Physics Like Sandbox
@@ -50,6 +54,19 @@ public class Sketch extends PApplet {
     public final long MASKC_NATURALLY_IMMOVABLE = MASK_SELF_CANT_SWAP | MASK_OTHERS_SHUFFLE_ON;
     public final long MASKC_FLOATING_DISPLACEABLE = MASK_SELF_CANT_SWAP | MASK_CAN_SWAP_WITH_ANY;
 
+    // TOOL_BRUSH_FILL = 0;
+    // TOOL_BRUSH_FILL_OVERRIDE = 1;
+    // TOOL_BRUSH_ERASE = 2;
+    // TOOL_INSPECT = 3;
+    // TOOL_COPY = 4;
+    // TOOL_CUT = 5;
+    // TOOL_PASTE = 6;
+    public int selectedTool = 0;
+    public String[] toolSymbols = {"🪣", "🖌️", "🧼", "🔍", "📄", "✂️", "📋"};
+
+    public boolean runSimulation = true;
+    public boolean canInteractStatusBar = true;
+
     public int brushRadius = 2;
     public long[][] canvas;  // x then y
 
@@ -59,6 +76,9 @@ public class Sketch extends PApplet {
     public int canvasWidth = 100 * 2;
     public int canvasHeight = 60 * 2;
     public int sandSize = 5;
+
+    public PFont fontEmoji;
+    public PFont fontDefault;
 
     // TODO: subjected for removal (temorary testing)
     public int count = 0;
@@ -72,7 +92,7 @@ public class Sketch extends PApplet {
 
     @Override
     public void settings() {
-        size(canvasWidth * sandSize, canvasHeight * sandSize);
+        size(canvasWidth * sandSize, canvasHeight * sandSize + (sandSize + 40));
         canvas = new long[canvasWidth][canvasHeight];
 
         for (int x = 0; x < canvasWidth; x++) {
@@ -84,18 +104,22 @@ public class Sketch extends PApplet {
 
     @Override
     public void setup() {
-        fill(255);
-        colorMode(HSB, 255, 100, 100);
+        fontEmoji = createFont("font/NotoEmoji.ttf", 20);
+        fontDefault = createFont("SansSerif", 12);
     }
 
     @Override
     public void draw() {
-        background(0);
+        background(255);
 
         cellRenderCanvas();
-        if (keyPressed) cellsTickAll();
-        
+        if (runSimulation) cellsTickAll();
+
+        renderStatusBar();
+
         // fps
+
+        textFont(fontDefault);
         fill(255);
         textAlign(LEFT, TOP);
         text(String.format("fps %d", (int)frameRate), 0, 0);
@@ -112,7 +136,7 @@ public class Sketch extends PApplet {
         for (int yOffset = -brushRadius; yOffset <= brushRadius; yOffset++) {
             for (int xOffset = -brushRadius; xOffset <= brushRadius; xOffset++) {
                 canvas[Math.clamp(mouseX + xOffset, 0, canvasWidth - 1)][Math.clamp(mouseY + yOffset, 0, canvasHeight - 1)] = cellEncodeData(
-                    true, color(hue, 100, 100),
+                    true, color(hue, 255, 255),
                     (byte)(keyPressed && keyCode == SHIFT ? 2 : 1),
                     0,
                     (byte)((MASK_CAN_SHUFFLE)
@@ -121,6 +145,109 @@ public class Sketch extends PApplet {
                 ));
             }
         }
+    }
+
+    @Override
+    public void mousePressed(MouseEvent event) {
+        if (canInteractStatusBar) handleStatusBarClick(event.getX(), event.getY());
+    }
+
+    public void handleStatusBarClick(int x, int y) {
+        if (x < 0 || x > width || y > height || y < height - 40) return;
+
+        if (x <= 40) { // pause/play
+            runSimulation = !runSimulation;
+        } else if (x <= 80) { // step
+            cellsTickAll();
+        }
+
+        // tool selection
+        if (x >= 80 + 5 && x <= ((80 + 5) + (40 * toolSymbols.length))) {
+            selectedTool = Math.floorDiv((x - 80 - 5), 40);
+        }
+
+        if (x > width - 40) { // help button
+            System.out.println("help pressed");
+        }
+    }
+
+    // note: status bar is 40 px tall
+    // note: seperator size is 5
+    public void renderStatusBar() {
+        push();
+        colorMode(RGB, 255, 255, 255);
+        translate(0, height - 40);
+
+        // top seperator
+        fill(200);
+        rect(0, -5, width, 5);
+
+        // body
+        fill(0);
+        rect(0, 0, width, 40);
+        
+        textFont(fontEmoji);
+        textAlign(CENTER, CENTER);
+        if (runSimulation) {  // play
+            fill(82, 183, 136);
+            square(0, 0, 40);
+
+            fill(255);
+            text("▶", 20, 20 - (textAscent() - textDescent()) * 0.1f);
+        } else {  // pause
+            fill(204, 2, 2);
+            square(0, 0, 40);
+            
+            fill(255);
+            text("⏸", 20, 20 - (textAscent() - textDescent()) * 0.1f);
+        }
+
+        // step
+        translate(40, 0);
+        textAlign(CENTER, CENTER);
+        textFont(fontDefault, 50);
+        text(">", 20, 20);
+        line(10, 30, 30, 20);
+
+        // seperator vertical
+        fill(200);
+        rect(40, 0, 5, 40);
+        
+        // selected tool
+        translate(5 + 40, 0);
+        fill(255);
+        square(selectedTool * 40, 0, 40);
+
+        // tool render
+        textAlign(CENTER, CENTER);
+        textFont(fontEmoji, 25);
+        for (int i = 0; i < toolSymbols.length; i++) {
+            fill(i == selectedTool ? 0 : 255);
+            text(toolSymbols[i], 20 + (40 * i), 20);
+        }
+
+        // seperator vertical
+        fill(200);
+        translate((toolSymbols.length - 1) * 40, 0);
+        rect(40, 0, 5, 40);
+
+        pop();
+        push();
+        translate(width - 40, height - 40);
+
+        // help button
+        fill(255);
+        textAlign(CENTER, CENTER);
+        textFont(fontDefault, 25);
+        text("❓", 20, 20);
+
+        // seperator vertical
+        fill(200);
+        rect(-5, 0, 5, 40);
+
+        // TODO: some random text in the status bar that could be useful
+
+        pop();
     }
 
     /** tick all the cells in the canvas */
@@ -350,6 +477,7 @@ public class Sketch extends PApplet {
     /** renders the canvas to the screen */
     public void cellRenderCanvas() {
         noStroke();
+        colorMode(HSB, 255, 255, 255);
         for (int x = 0; x < canvasWidth; x++) {
             for (int y = 0; y < canvasHeight; y++) {
                 fill(cellGetColor(canvas[x][y]));
