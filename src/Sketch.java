@@ -2,7 +2,6 @@ import java.util.HashMap;
 
 import processing.core.PApplet;
 import processing.core.PFont;
-import processing.core.PShape;
 import processing.event.MouseEvent;
 
 // TODO: https://fonts.google.com/noto/specimen/Noto+Emoji source font
@@ -66,16 +65,21 @@ public class Sketch extends PApplet {
 
     public boolean runSimulation = true;
     public boolean canInteractStatusBar = true;
+    public boolean canInteractCanvas = true;
 
     public int brushRadius = 2;
     public long[][] canvas;  // x then y
+    public int canvasX = 25;
+    public int canvasY = 25;
+    public int canvasWidth = 100 * 2;
+    public int canvasHeight = 60 * 2;
+    public int sandSize = 5;
 
     public HashMap<Byte, TypeHandler> typeHandler = new HashMap<>();
     public HashMap<String, Byte> typeNames = new HashMap<>();
 
-    public int canvasWidth = 100 * 2;
-    public int canvasHeight = 60 * 2;
-    public int sandSize = 5;
+    public int statusbarSeperatorWidth = 5;
+    public int statusbarHeight = 40;
 
     public PFont fontEmoji;
     public PFont fontDefault;
@@ -92,7 +96,7 @@ public class Sketch extends PApplet {
 
     @Override
     public void settings() {
-        size(canvasWidth * sandSize, canvasHeight * sandSize + (sandSize + 40));
+        size(canvasWidth * sandSize + 50, canvasHeight * sandSize + (sandSize + 40) + 50);
         canvas = new long[canvasWidth][canvasHeight];
 
         for (int x = 0; x < canvasWidth; x++) {
@@ -112,37 +116,78 @@ public class Sketch extends PApplet {
     public void draw() {
         background(255);
 
-        cellRenderCanvas();
+        cellRenderCanvas(canvasX, canvasY);
         if (runSimulation) cellsTickAll();
 
         renderStatusBar();
+        if (selectedTool <= 2) renderToolBrushOverlay(canvasX, canvasY);
 
         // fps
-
         textFont(fontDefault);
         fill(255);
         textAlign(LEFT, TOP);
         text(String.format("fps %d", (int)frameRate), 0, 0);
     }
 
+    /**
+     * return the canvas coordinate for the related mouse position
+     * @param canvasX where the canvas has been rendered on the x axis
+     * @param canvasY where the canvas has been rendered on the y axis
+     * @param event mouse coordinates if mouseX and mouseY is unreliable, if you dont have this just pass in null
+     * @return updated x and y coordinates. 32bits on the left is the x coordinates as int, and 32bits on the right is y coordinates as int
+     *         <br> Use a bitwise mask to access the value {@code x = (int)(res >>> 32);} {@code y = (int)(res & Integer.MAX_VALUE)}
+     */
+    public long mousePosToCanvas(int canvasX, int canvasY, MouseEvent event) {
+        int mouseX = this.mouseX;
+        int mouseY = this.mouseY;
+
+        if (event != null) {
+            mouseX = event.getX();
+            mouseY = event.getY();
+        }
+
+        int x = (mouseX - canvasX) / sandSize;
+        int y = (mouseY - canvasY) / sandSize;
+
+        return ((long)x << 32) | y;
+    }
+
     @Override
     public void mouseDragged(MouseEvent event) {
-        int mouseX = Math.clamp(event.getX() / sandSize, 0, canvasWidth - 1);
-        int mouseY = Math.clamp(event.getY() / sandSize, 0, canvasHeight - 1);
+        long pos = mousePosToCanvas(canvasX, canvasY, event);
+        int mouseX = (int)(pos >>> 32);
+        int mouseY = (int)(pos & Integer.MAX_VALUE);
+
+        if (
+            (mouseX < 0 || mouseX > canvasWidth - 1)
+            || (mouseY < 0 || mouseY > canvasHeight - 1)
+        ) return;
         
         // TODO: get rid of hue and replace with something else
         int hue = count++ % 360;
         
-        for (int yOffset = -brushRadius; yOffset <= brushRadius; yOffset++) {
-            for (int xOffset = -brushRadius; xOffset <= brushRadius; xOffset++) {
-                canvas[Math.clamp(mouseX + xOffset, 0, canvasWidth - 1)][Math.clamp(mouseY + yOffset, 0, canvasHeight - 1)] = cellEncodeData(
-                    true, color(hue, 255, 255),
-                    (byte)(keyPressed && keyCode == SHIFT ? 2 : 1),
-                    0,
-                    (byte)((MASK_CAN_SHUFFLE)
-                    | (count % 2 == 0 ? MASK_SWAP_UP : 0)
-                    | (keyPressed && keyCode == CONTROL ? MASKC_NATURALLY_IMMOVABLE : 0)
-                ));
+        int xRightBounds = Math.clamp(mouseX + brushRadius, 0, canvasWidth - 1) ;
+        int yDownBounds = Math.clamp(mouseY + brushRadius, 0, canvasHeight - 1) ;
+
+        long cell = cellEncodeData(
+            true, color(hue, 255, 255),
+            (byte)(keyPressed && keyCode == SHIFT ? 2 : 1),
+            0,
+            (byte)((MASK_CAN_SHUFFLE)
+            | (count % 2 == 0 ? MASK_SWAP_UP : 0)
+            | (keyPressed && keyCode == CONTROL ? MASKC_NATURALLY_IMMOVABLE : 0)
+        ));
+
+        // brush handler
+        for (int x = Math.clamp(mouseX - brushRadius, 0, canvasWidth - 1); x <= xRightBounds; x++) {
+            for (int y = Math.clamp(mouseY - brushRadius, 0, canvasHeight - 1); y <= yDownBounds; y++) {
+                if (selectedTool == 0 && cellGetType(canvas[x][y]) == 0) {  // fill air space
+                    canvas[x][y] = cell;
+                } else if (selectedTool == 1) {  // brush, replace cells if nessesary
+                    canvas[x][y] = cell;
+                } else if (selectedTool == 2) {  // eraser
+                    canvas[x][y] = CELL_AIR;
+                }
             }
         }
     }
@@ -158,7 +203,7 @@ public class Sketch extends PApplet {
         if (x <= 40) { // pause/play
             runSimulation = !runSimulation;
         } else if (x <= 80) { // step
-            cellsTickAll();
+            if (!runSimulation) cellsTickAll();
         }
 
         // tool selection
@@ -171,16 +216,66 @@ public class Sketch extends PApplet {
         }
     }
 
+    public boolean canvasMouseOutside(int canvasX, int canvasY, MouseEvent event) {
+        int x = mouseX;
+        int y = mouseY;
+
+        if (event != null) {
+            x = event.getX();
+            y = event.getY();
+        }
+
+        x -= canvasX;
+        y -= canvasY;
+        
+        return (x <= 0 || x >= (canvasWidth * sandSize))
+            || (y <= 0 || y >= (canvasHeight * sandSize));
+    }
+
+    public void renderToolBrushOverlay(int canvasX, int canvasY) {
+        if (canvasMouseOutside(canvasX, canvasY, null)) return;
+        long pos = mousePosToCanvas(canvasX, canvasY, null);
+        int x = (int)(pos >>> 32);
+        int y = (int)(pos & Integer.MAX_VALUE);
+
+        // to make sure brush doesnt clip off the canvas
+        int xOffset = 0;
+        int yOffset = 0;
+
+        if (x <= brushRadius) {
+            xOffset = brushRadius - x;
+        } else if (x >= (canvasWidth - brushRadius)) {
+            xOffset = brushRadius - (canvasWidth - x - 1);
+        }
+
+        if (y <= brushRadius) {
+            yOffset = brushRadius - y;
+        } else if (y >= (canvasHeight - brushRadius)) {
+            yOffset = brushRadius - (canvasHeight - y - 1);
+        }
+
+        int brushWidth = (brushRadius * 2 + 1 - xOffset) * sandSize;
+        int brushHeight = (brushRadius * 2 + 1 - yOffset) * sandSize;
+
+        fill(255, 200);
+        rect(
+            Math.clamp(canvasX + (x - brushRadius) * sandSize, canvasX, canvasX + canvasWidth * sandSize),
+            Math.clamp(canvasY + (y - brushRadius) * sandSize, canvasY, canvasY + canvasHeight * sandSize),
+            brushWidth,
+            brushHeight
+        );
+    }
+
     // note: status bar is 40 px tall
     // note: seperator size is 5
     public void renderStatusBar() {
         push();
         colorMode(RGB, 255, 255, 255);
-        translate(0, height - 40);
+        translate(0, height - statusbarHeight);
 
         // top seperator
         fill(200);
-        rect(0, -5, width, 5);
+        rect(0, -statusbarSeperatorWidth, width, statusbarSeperatorWidth);
 
         // body
         fill(0);
@@ -190,60 +285,59 @@ public class Sketch extends PApplet {
         textAlign(CENTER, CENTER);
         if (runSimulation) {  // play
             fill(82, 183, 136);
-            square(0, 0, 40);
+            square(0, 0, statusbarHeight);
 
             fill(255);
-            text("▶", 20, 20 - (textAscent() - textDescent()) * 0.1f);
+            text("▶", statusbarHeight / 2f, statusbarHeight / 2f);
         } else {  // pause
             fill(204, 2, 2);
-            square(0, 0, 40);
+            square(0, 0, statusbarHeight);
             
             fill(255);
-            text("⏸", 20, 20 - (textAscent() - textDescent()) * 0.1f);
+            text("⏸", statusbarHeight / 2f, statusbarHeight / 2f);
         }
 
         // step
-        translate(40, 0);
+        translate(statusbarHeight, 0);
         textAlign(CENTER, CENTER);
         textFont(fontDefault, 50);
-        text(">", 20, 20);
-        line(10, 30, 30, 20);
+        text(">", statusbarHeight / 2f, statusbarHeight / 2f);
 
         // seperator vertical
         fill(200);
-        rect(40, 0, 5, 40);
+        rect(statusbarHeight, 0, statusbarSeperatorWidth, statusbarHeight);
         
         // selected tool
-        translate(5 + 40, 0);
+        translate(statusbarSeperatorWidth + statusbarHeight, 0);
         fill(255);
-        square(selectedTool * 40, 0, 40);
+        square(selectedTool * statusbarHeight, 0, statusbarHeight);
 
         // tool render
         textAlign(CENTER, CENTER);
         textFont(fontEmoji, 25);
         for (int i = 0; i < toolSymbols.length; i++) {
             fill(i == selectedTool ? 0 : 255);
-            text(toolSymbols[i], 20 + (40 * i), 20);
+            text(toolSymbols[i], (statusbarHeight / 2f) + (statusbarHeight * i), (statusbarHeight / 2f));
         }
 
         // seperator vertical
         fill(200);
-        translate((toolSymbols.length - 1) * 40, 0);
-        rect(40, 0, 5, 40);
+        translate((toolSymbols.length - 1) * statusbarHeight, 0);
+        rect(statusbarHeight, 0, statusbarSeperatorWidth, statusbarHeight);
 
         pop();
         push();
-        translate(width - 40, height - 40);
+        translate(width - statusbarHeight, height - statusbarHeight);
 
         // help button
         fill(255);
         textAlign(CENTER, CENTER);
         textFont(fontDefault, 25);
-        text("❓", 20, 20);
+        text("❓", statusbarHeight / 2f, statusbarHeight / 2f);
 
         // seperator vertical
         fill(200);
-        rect(-5, 0, 5, 40);
+        rect(-statusbarSeperatorWidth, 0, statusbarSeperatorWidth, statusbarHeight);
 
         // TODO: some random text in the status bar that could be useful
 
@@ -475,15 +569,19 @@ public class Sketch extends PApplet {
 
     // TODO: maybe add some parameters to place the canvas anywhere
     /** renders the canvas to the screen */
-    public void cellRenderCanvas() {
+    public void cellRenderCanvas(int canvasX, int canvasY) {
         noStroke();
+        background(128);
         colorMode(HSB, 255, 255, 255);
+
+        translate(canvasX, canvasY);
         for (int x = 0; x < canvasWidth; x++) {
             for (int y = 0; y < canvasHeight; y++) {
                 fill(cellGetColor(canvas[x][y]));
                 square(x * sandSize, y * sandSize, sandSize);
             }
         }
+        translate(-canvasX, -canvasY);
     }
 
     /**
