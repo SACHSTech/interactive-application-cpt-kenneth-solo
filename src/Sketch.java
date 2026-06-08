@@ -16,21 +16,23 @@ public class Sketch extends PApplet {
      * 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
      * <------[rgb / hsb]------->  Type    <-------[metadata]------->  |<State and Rules (aka. flags)
      * 
-     * Red, Green, Blue: Particle Color (mask is -1099511627776) (this channel can also support hsb) (we are cutting the first bit for a flag)
-     * Type: Particle Type (for special behaviour if applicable) (mask is 1095216660480)
+     * Red, Green, Blue: Particle Color (this channel can also support hsb) (we are cutting the first bit for a flag)
+     * Type: Particle Type (for special behaviour if applicable)
      *      0 represents air
      *      -127 represents a barrier floor (basically cells outside the canvas range to prevent the cell from escaping)
      * Metadata (just borrowed the rest of the bits from the gravity byte, dont mind me)
      *      xx000000 00000000 00000000
      *      storing data about the cell i guess. could be useful for keeping track of stuff
-     *      This value is represented as a byte
      * State and Rules (aka. flags) (the state of the cell and some rules that all cells probably have in common)
      *      See below for misc flags. start at {@link #MASK_TICKED}
      */
 
     public final long MASK_COLOR =             Long.parseUnsignedLong("11111111 11111111 11111111 00000000 00000000 00000000 00000000 00000000".replace(" ", ""), 2);
+    public final int SHIFT_COLOR =             40;
     public final long MASK_TYPE =              Long.parseUnsignedLong("00000000 00000000 00000000 11111111 00000000 00000000 00000000 00000000".replace(" ", ""), 2);
+    public final int SHIFT_TYPE =              32;
     public final long MASK_METADATA =          Long.parseUnsignedLong("00000000 00000000 00000000 00000000 11111111 11111111 11111111 00000000".replace(" ", ""), 2);
+    public final int SHIFT_METADATA =          8;
 
     /** has this cell ticked this iteration yet? */
     public final long MASK_TICKED =            Long.parseUnsignedLong("00000000 00000000 00000000 00000000 00000000 00000000 00000000 10000000".replace(" ", ""), 2);
@@ -53,17 +55,15 @@ public class Sketch extends PApplet {
     public final long MASKC_NATURALLY_IMMOVABLE = MASK_SELF_CANT_SWAP | MASK_OTHERS_SHUFFLE_ON;
     public final long MASKC_FLOATING_DISPLACEABLE = MASK_SELF_CANT_SWAP | MASK_CAN_SWAP_WITH_ANY;
 
-    // TOOL_BRUSH_FILL = 0;
-    // TOOL_BRUSH_FILL_OVERRIDE = 1;
-    // TOOL_BRUSH_ERASE = 2;
-    // TOOL_INSPECT = 3;
-    // TOOL_COPY = 4;
-    // TOOL_CUT = 5;
-    // TOOL_PASTE = 6;
+    public final int TOOL_BRUSH_FILL = 0;
+    public final int TOOL_BRUSH_FILL_OVERRIDE = 1;
+    public final int TOOL_BRUSH_ERASE = 2;
+    public final int TOOL_INSPECT = 3;
     public int selectedTool = 0;
-    public String[] toolSymbols = {"🪣", "🖌️", "🧼", "🔍", "📄", "✂️", "📋"};
+    public String[] toolSymbols = {"🪣", "🖌️", "🧼", "🔍"};
 
     public boolean runSimulation = true;
+    public boolean debuggingMetrics = true;
     public boolean canInteractStatusBar = true;
     public boolean canInteractCanvas = true;
 
@@ -97,13 +97,8 @@ public class Sketch extends PApplet {
     @Override
     public void settings() {
         size(canvasWidth * sandSize + 50, canvasHeight * sandSize + (sandSize + 40) + 50);
-        canvas = new long[canvasWidth][canvasHeight];
 
-        for (int x = 0; x < canvasWidth; x++) {
-            for (int y = 0; y < canvasHeight; y++) {
-                canvas[x][y] = CELL_AIR;
-            }
-        }
+        canvasInit(canvasWidth, canvasHeight);
     }
 
     @Override
@@ -114,19 +109,28 @@ public class Sketch extends PApplet {
 
     @Override
     public void draw() {
-        background(255);
-
         cellRenderCanvas(canvasX, canvasY);
-        if (runSimulation) cellsTickAll();
+        if (runSimulation) cellTickAll();
 
         renderStatusBar();
-        if (selectedTool <= 2) renderToolBrushOverlay(canvasX, canvasY);
 
+        if (selectedTool != TOOL_INSPECT) {
+            renderToolOverlay(canvasX, canvasY, brushRadius);
+        } else {
+            renderToolOverlay(canvasX, canvasY, 0);
+        }
+
+        setCursor();
+
+        if (debuggingMetrics) renderDebuggers();
+    }
+
+    public void renderDebuggers() {
         // fps
         textFont(fontDefault);
         fill(255);
         textAlign(LEFT, TOP);
-        text(String.format("fps %d", (int)frameRate), 0, 0);
+        text(String.format("FPS: %d", (int)frameRate), 0, 0);
     }
 
     /**
@@ -134,10 +138,9 @@ public class Sketch extends PApplet {
      * @param canvasX where the canvas has been rendered on the x axis
      * @param canvasY where the canvas has been rendered on the y axis
      * @param event mouse coordinates if mouseX and mouseY is unreliable, if you dont have this just pass in null
-     * @return updated x and y coordinates. 32bits on the left is the x coordinates as int, and 32bits on the right is y coordinates as int
-     *         <br> Use a bitwise mask to access the value {@code x = (int)(res >>> 32);} {@code y = (int)(res & Integer.MAX_VALUE)}
+     * @return updated x and y coordinates. [x, y]
      */
-    public long mousePosToCanvas(int canvasX, int canvasY, MouseEvent event) {
+    public Integer[] canvasXYFromMouse(int canvasX, int canvasY, MouseEvent event) {
         int mouseX = this.mouseX;
         int mouseY = this.mouseY;
 
@@ -149,19 +152,24 @@ public class Sketch extends PApplet {
         int x = (mouseX - canvasX) / sandSize;
         int y = (mouseY - canvasY) / sandSize;
 
-        return ((long)x << 32) | y;
+        // using x and y to detect if has gone below 0 does not work because 
+        //      it returns 0 for the mouse being `sandSize` px to the left or top of 0
+        //      (most likely from truncation when dividing by int)
+        if (
+            ((mouseX - canvasX) < 0 || x > canvasWidth - 1)
+            || ((mouseY - canvasY) < 0 || y > canvasHeight - 1)
+        ) return null;
+
+        return new Integer[]{x, y};
     }
 
     @Override
     public void mouseDragged(MouseEvent event) {
-        long pos = mousePosToCanvas(canvasX, canvasY, event);
-        int mouseX = (int)(pos >>> 32);
-        int mouseY = (int)(pos & Integer.MAX_VALUE);
+        Integer[] pos = canvasXYFromMouse(canvasX, canvasY, event);
+        if (pos == null) return;
 
-        if (
-            (mouseX < 0 || mouseX > canvasWidth - 1)
-            || (mouseY < 0 || mouseY > canvasHeight - 1)
-        ) return;
+        int mouseX = pos[0];
+        int mouseY = pos[1];
         
         // TODO: get rid of hue and replace with something else
         int hue = count++ % 360;
@@ -181,11 +189,11 @@ public class Sketch extends PApplet {
         // brush handler
         for (int x = Math.clamp(mouseX - brushRadius, 0, canvasWidth - 1); x <= xRightBounds; x++) {
             for (int y = Math.clamp(mouseY - brushRadius, 0, canvasHeight - 1); y <= yDownBounds; y++) {
-                if (selectedTool == 0 && cellGetType(canvas[x][y]) == 0) {  // fill air space
+                if (selectedTool == TOOL_BRUSH_FILL && cellGetType(canvas[x][y]) == 0) {
                     canvas[x][y] = cell;
-                } else if (selectedTool == 1) {  // brush, replace cells if nessesary
+                } else if (selectedTool == TOOL_BRUSH_FILL_OVERRIDE) {
                     canvas[x][y] = cell;
-                } else if (selectedTool == 2) {  // eraser
+                } else if (selectedTool == TOOL_BRUSH_ERASE) {
                     canvas[x][y] = CELL_AIR;
                 }
             }
@@ -194,29 +202,69 @@ public class Sketch extends PApplet {
 
     @Override
     public void mousePressed(MouseEvent event) {
-        if (canInteractStatusBar) handleStatusBarClick(event.getX(), event.getY());
+        if (canInteractStatusBar) handleStatusBarMouse(event.getX(), event.getY());
     }
 
-    public void handleStatusBarClick(int x, int y) {
-        if (x < 0 || x > width || y > height || y < height - 40) return;
+    public void canvasInit(int width, int height) {
+        canvas = new long[width][height];
 
-        if (x <= 40) { // pause/play
+        for (int x = 0; x < canvasWidth; x++) {
+            for (int y = 0; y < canvasHeight; y++) {
+                canvas[x][y] = CELL_AIR;
+            }
+        }
+    }
+
+    public void handleStatusBarMouse(int x, int y) {
+        if (x < 0 || x > width || y > height || y < height - statusbarHeight) return;
+
+        if (x <= statusbarHeight) { // pause/play
             runSimulation = !runSimulation;
-        } else if (x <= 80) { // step
-            if (!runSimulation) cellsTickAll();
+        } else if (x <= (statusbarHeight * 2)) { // step
+            if (!runSimulation) cellTickAll();
         }
 
         // tool selection
-        if (x >= 80 + 5 && x <= ((80 + 5) + (40 * toolSymbols.length))) {
-            selectedTool = Math.floorDiv((x - 80 - 5), 40);
+        final int toolSectionBegin = (statusbarHeight * 2) + statusbarSeperatorWidth;
+        final int toolSectionEnd = toolSectionBegin + (statusbarHeight * toolSymbols.length);
+        if (x >= toolSectionBegin && x <= toolSectionEnd) {
+            selectedTool = Math.floorDiv((x - (statusbarHeight * 2) - statusbarSeperatorWidth), statusbarHeight);
         }
 
-        if (x > width - 40) { // help button
+        final int helpBegin = width - statusbarHeight;
+        if (x > helpBegin) { // help button
             System.out.println("help pressed");
         }
     }
 
-    public boolean canvasMouseOutside(int canvasX, int canvasY, MouseEvent event) {
+    public void setCursor() {
+        if (mouseX >= 0 && mouseX <= width && mouseY < height && mouseY >= height - statusbarHeight) {
+            final int toolBarBegin = (statusbarHeight * 2) + statusbarSeperatorWidth;
+            final int toolBarEnd = (((statusbarHeight * 2) + statusbarSeperatorWidth) + (statusbarHeight * toolSymbols.length));
+            final int runStepEnd = (statusbarHeight * 2);
+            final int helpStart = width - statusbarHeight;
+
+            if (
+                mouseX <= runStepEnd
+                || (mouseX >= toolBarBegin && mouseX <= toolBarEnd)
+                || mouseX > helpStart
+            ) {
+                cursor(HAND);
+            } else {
+                cursor(ARROW);
+            }
+        } else if (!canvasIsMouseOutside(canvasX, canvasY, null)) {
+            if (selectedTool == TOOL_INSPECT) {
+                cursor(HAND);
+            } else {
+                noCursor();
+            }
+        } else {
+            cursor(ARROW);
+        }
+    }
+
+    public boolean canvasIsMouseOutside(int canvasX, int canvasY, MouseEvent event) {
         int x = mouseX;
         int y = mouseY;
 
@@ -232,42 +280,48 @@ public class Sketch extends PApplet {
             || (y <= 0 || y >= (canvasHeight * sandSize));
     }
 
-    public void renderToolBrushOverlay(int canvasX, int canvasY) {
-        if (canvasMouseOutside(canvasX, canvasY, null)) return;
-        long pos = mousePosToCanvas(canvasX, canvasY, null);
-        int x = (int)(pos >>> 32);
-        int y = (int)(pos & Integer.MAX_VALUE);
+    /**
+     * renders a square overlay for the selected tool
+     * @param canvasX canvas begining x position
+     * @param canvasY canvas begining y position
+     * @param radius radius of the brush. the diamater of the brush is (1 + (2 * radius))
+     */
+    public void renderToolOverlay(int canvasX, int canvasY, int radius) {
+        if (canvasIsMouseOutside(canvasX, canvasY, null)) return;
+        Integer[] pos = canvasXYFromMouse(canvasX, canvasY, null);
+        if (pos == null) return;
+        
+        int x = pos[0];
+        int y = pos[1];
 
         // to make sure brush doesnt clip off the canvas
         int xOffset = 0;
         int yOffset = 0;
 
-        if (x <= brushRadius) {
-            xOffset = brushRadius - x;
-        } else if (x >= (canvasWidth - brushRadius)) {
-            xOffset = brushRadius - (canvasWidth - x - 1);
+        if (x <= radius) {
+            xOffset = radius - x;
+        } else if (x >= (canvasWidth - radius)) {
+            xOffset = radius - (canvasWidth - x - 1);
         }
 
-        if (y <= brushRadius) {
-            yOffset = brushRadius - y;
-        } else if (y >= (canvasHeight - brushRadius)) {
-            yOffset = brushRadius - (canvasHeight - y - 1);
+        if (y <= radius) {
+            yOffset = radius - y;
+        } else if (y >= (canvasHeight - radius)) {
+            yOffset = radius - (canvasHeight - y - 1);
         }
 
-        int brushWidth = (brushRadius * 2 + 1 - xOffset) * sandSize;
-        int brushHeight = (brushRadius * 2 + 1 - yOffset) * sandSize;
+        int brushWidth = (radius * 2 + 1 - xOffset) * sandSize;
+        int brushHeight = (radius * 2 + 1 - yOffset) * sandSize;
 
         fill(255, 200);
         rect(
-            Math.clamp(canvasX + (x - brushRadius) * sandSize, canvasX, canvasX + canvasWidth * sandSize),
-            Math.clamp(canvasY + (y - brushRadius) * sandSize, canvasY, canvasY + canvasHeight * sandSize),
+            Math.clamp(canvasX + (x - radius) * sandSize, canvasX, canvasX + canvasWidth * sandSize),
+            Math.clamp(canvasY + (y - radius) * sandSize, canvasY, canvasY + canvasHeight * sandSize),
             brushWidth,
             brushHeight
         );
     }
 
-    // note: status bar is 40 px tall
-    // note: seperator size is 5
     public void renderStatusBar() {
         push();
         colorMode(RGB, 255, 255, 255);
@@ -279,7 +333,7 @@ public class Sketch extends PApplet {
 
         // body
         fill(0);
-        rect(0, 0, width, 40);
+        rect(0, 0, width, statusbarHeight);
         
         textFont(fontEmoji);
         textAlign(CENTER, CENTER);
@@ -339,13 +393,11 @@ public class Sketch extends PApplet {
         fill(200);
         rect(-statusbarSeperatorWidth, 0, statusbarSeperatorWidth, statusbarHeight);
 
-        // TODO: some random text in the status bar that could be useful
-
         pop();
     }
 
     /** tick all the cells in the canvas */
-    public void cellsTickAll() {
+    public void cellTickAll() {
         for (int x = 0; x < canvasWidth; x++) {
             for (int y = 0; y < canvasHeight; y++) {
                 long cell = canvas[x][y];
@@ -372,18 +424,19 @@ public class Sketch extends PApplet {
         canvas[x][y] |= MASK_TICKED;
 
         if (canMove) {
-            if (cellCommonsApplyGravity(cell, x, y)) {
+            if (cellApplyGravity(cell, x, y)) {
                 y++;
                 cell = canvas[x][y];
             } else if (cellIsFlagOn(cell, MASK_CAN_SHUFFLE)) {
-                long updatedPos = cellApplyShuffling(cell, x, y);
-                x = (int)(updatedPos >>> 32);
-                y = (int)(updatedPos & Integer.MAX_VALUE);
+                Integer[] updatedPos = cellApplyShuffling(cell, x, y);
+                x = updatedPos[0];
+                y = updatedPos[1];
                 cell = canvas[x][y];
             }
         }
 
-        if (typeHandler.get(cellGetType(cell)) instanceof TypeHandler handler) {
+        TypeHandler handler = typeHandler.get(cellGetType(cell));
+        if (handler != null) {
             handler.run(cell, x, y, true, false);
         }
     }
@@ -396,9 +449,9 @@ public class Sketch extends PApplet {
      * @throws Exception will throw hands if name is already taken or uniqueID has already been reserved 
      * @see TypeHandler
      */
-    public void registerType(String name, byte uniqueID, TypeHandler handler) throws Exception {
+    public void typeRegister(String name, byte uniqueID, TypeHandler handler) throws Exception {
         if (typeNames.containsKey(name)) throw new Exception(String.format("type of name \"%s\" exists", name));
-        if (typeHandler.containsKey(uniqueID)) throw new Exception(String.format("id &d is already reserved, cannot assign \"%s\"", name));
+        if (typeHandler.containsKey(uniqueID)) throw new Exception(String.format("id %d is already reserved, cannot assign \"%s\"", name));
 
         typeNames.put(name, uniqueID);
         typeHandler.put(uniqueID, handler);
@@ -410,16 +463,15 @@ public class Sketch extends PApplet {
      * @param x cell x on canvas
      * @param y cell y on canvas
      * @param direction where the cell is moving towards according to gravity rule (see above for sector)
-     * @return updated x and y coordinates. 32bits on the left is the x coordinates as int, and 32bits on the right is y coordinates as int
-     *         <br> Use a bitwise mask to access the value {@code x = (int)(res >>> 32);} {@code y = (int)(res & Integer.MAX_VALUE)}
+     * @return updated x and y coordinates. [x, y]
      */
-    public long cellApplyShuffling(long cell, int x, int y) {
+    public Integer[] cellApplyShuffling(long cell, int x, int y) {
         // when shuffling:
         //      tick the cell ahead if it hasn't already ticked
         //      you must shuffle on a surface that permits you to do so
         //      if you are unable to shuffle. you are prob on a still surface. permit others to shuffle on you by enabling the MASK_OTHERS_SHUFFLE_ON flag
         int direction = cellSwapDirection(cell);
-        if (direction == 0 || cellIsFlagOn(cell, MASK_SELF_CANT_SWAP)) return ((long)x << 32) | y;
+        if (direction == 0 || cellIsFlagOn(cell, MASK_SELF_CANT_SWAP)) return new Integer[]{x, y};
         long cellAhead = cellAtXYSafe(x, y + direction);
 
         if (!cellIsFlagOn(cellAhead, MASK_TICKED)) {
@@ -441,7 +493,7 @@ public class Sketch extends PApplet {
             canvas[x][y] &= ~MASK_OTHERS_SHUFFLE_ON;
         }
 
-        return ((long)x << 32) | y;
+        return new Integer[]{x, y};
     }
 
     /**
@@ -474,9 +526,9 @@ public class Sketch extends PApplet {
      * @param cell cell value at (x, y)
      * @param x cell x coords in the canvas
      * @param y cell y coords in the canvas
-     * @return true when the cell has moved
+     * @return true when the cell has moved, false otherwise
      */
-    public boolean cellCommonsApplyGravity(long cell, int x, int y) {
+    public boolean cellApplyGravity(long cell, int x, int y) {
         int cellDirection = cellSwapDirection(cell);
         long cellBelow = cellAtXYSafe(x, y + 1);
         int cellBelowDirection = cellSwapDirection(cellBelow);
@@ -487,20 +539,17 @@ public class Sketch extends PApplet {
         if (Math.abs(netDirection) == 2) return false;
         if (cellIsFlagOn(cellBelow, MASK_TICKED)) return false;
         
-        boolean sameType = cellGetType(cell) == cellGetType(cellBelow);
-        if (
-            sameType                                                                    // both must be the same type, must be moving towards together by checking: 
-            && Math.abs(netDirection) == 0 && cellIsFlagOn(cellBelow, MASK_SWAP_UP)     // if the one below is going up (if this is true then  current cell is down since netDirection would equal 0)
-            && !cellIsFlagOn(cell | cellBelow, MASK_SELF_CANT_SWAP)                     // also both must be swappable
-        ) {
+        final boolean isSameType = cellGetType(cell) == cellGetType(cellBelow);
+        final boolean isBothSwappable = !cellIsFlagOn(cell | cellBelow, MASK_SELF_CANT_SWAP);
+        final boolean isColliding = Math.abs(netDirection) == 0 && cellIsFlagOn(cellBelow, MASK_SWAP_UP);
+
+        final boolean canMutuallySwap = (cellIsFlagOn(cell, MASK_CAN_SWAP_WITH_ANY) && cellBelowDirection == -1)
+                                        || (cellDirection == 1 && cellIsFlagOn(cellBelow, MASK_CAN_SWAP_WITH_ANY));
+        final boolean displaceablePresent = Math.abs(netDirection) == 1;
+
+        if (isSameType && isColliding && isBothSwappable) {
             return cellMoveRelativeInternal(x, y, 0, 1);
-        } else if (
-            Math.abs(netDirection) == 1                                                         // cell is not of same type so that means there is a displaceable and a swapee
-            && (                                                                                // we can preforme a swap if the current cell is a swappable and the cell below wants to swap up
-                (cellIsFlagOn(cell, MASK_CAN_SWAP_WITH_ANY) && cellBelowDirection == -1)        // or if the current cell wants to swap down and the cell below is a swappable
-                || (cellDirection == 1 && cellIsFlagOn(cellBelow, MASK_CAN_SWAP_WITH_ANY))
-            )
-        ) {
+        } else if (displaceablePresent && canMutuallySwap) {
             return cellMoveRelativeInternal(x, y, 0, 1);
         }
 
@@ -515,7 +564,7 @@ public class Sketch extends PApplet {
      * @return true if it was removed successfully, otherwise false
      */
     public boolean cellRemove(int x, int y, boolean userRequested) {
-        if (x < 0 || x >= canvasWidth || isYOutOfBounds(y)) return false;
+        if (canvasIsCoordinatesOutOfBounds(x, y)) return false;
         if (cellIsFlagOn(canvas[x][y], MASK_INDESTRUCTABLE) && !userRequested) return false;
         
         canvas[x][y] = CELL_AIR;
@@ -547,12 +596,13 @@ public class Sketch extends PApplet {
     }
 
     /**
-     * checks if y is within the canvas bounds
+     * checks if [x, y] is within the canvas bounds
+     * @param x the x axis to check
      * @param y the y axis to check
-     * @return true if y is within the canvas bounds, else otherwise
+     * @return true if [x, y] is within the canvas bounds, else otherwise
      */
-    public boolean isYOutOfBounds(int y) {
-        return y < 0 || y >= canvasHeight;
+    public boolean canvasIsCoordinatesOutOfBounds(int x, int y) {
+        return (x < 0 || x >= canvasWidth) || (y < 0 || y >= canvasHeight);
     }
 
     /**
@@ -562,12 +612,10 @@ public class Sketch extends PApplet {
      * @return the cell's value or {@link #CELL_BARRIER_FLOOR} if x, y is not on the canvas
      */
     public long cellAtXYSafe(int x, int y) {
-        if (isYOutOfBounds(y)) return CELL_BARRIER_FLOOR;
-        if (x < 0 || x >= canvasWidth) return CELL_BARRIER_FLOOR;
+        if (canvasIsCoordinatesOutOfBounds(x, y)) return CELL_BARRIER_FLOOR;
         return canvas[x][y];
     }
 
-    // TODO: maybe add some parameters to place the canvas anywhere
     /** renders the canvas to the screen */
     public void cellRenderCanvas(int canvasX, int canvasY) {
         noStroke();
@@ -664,13 +712,11 @@ public class Sketch extends PApplet {
      * @return
      */
     public long cellEncodeData(boolean customColor, int color, byte type, int metadata, byte flags) {
-        // 16777215 represnts the first 3 bytes of the integer on the right.
-        // in this case for color we do not care about the byte on the left because the alpha channel is meaningless to us
-        // for metadata we do the same
+        final int rightThreeBytes = 16777215;
 
-        return Integer.toUnsignedLong(color & 16777215) << 40
-            | Byte.toUnsignedLong(type) << 32
-            | Integer.toUnsignedLong(metadata & 16777215) << 8
+        return Integer.toUnsignedLong(color & rightThreeBytes) << SHIFT_COLOR
+            | Byte.toUnsignedLong(type) << SHIFT_TYPE
+            | Integer.toUnsignedLong(metadata & rightThreeBytes) << SHIFT_METADATA
             | Byte.toUnsignedLong(flags);
     }
 
@@ -681,11 +727,8 @@ public class Sketch extends PApplet {
      * @see #color(int, int, int)
      */
     public int cellGetColor(long cell) {
-        // -1099511627776 represents the rgb section of the cell value
-        // we must add back the alpha section so that processing can recognise the color (append 8 on bits to the left)
-        //      this value is -16777216
-
-        return -16777216 | (int)((cell & MASK_COLOR) >>> 40);
+        final int alphaChannel = -16777216;
+        return alphaChannel | (int)((cell & MASK_COLOR) >>> SHIFT_COLOR);
     }
 
     /**
@@ -694,7 +737,7 @@ public class Sketch extends PApplet {
      * @return the cell's type
      */
     public byte cellGetType(long cell) {
-        return (byte)((cell & MASK_TYPE) >>> 32);
+        return (byte)((cell & MASK_TYPE) >>> SHIFT_TYPE);
     }
 
     /**
@@ -702,8 +745,8 @@ public class Sketch extends PApplet {
      * @param cell the cell to fetch the metadata from
      * @return cell metadata
      */
-    public int getMetadata(long cell) {
-        return (int)((cell & MASK_METADATA) >>> 24);
+    public int cellGetMetadata(long cell) {
+        return (int)((cell & MASK_METADATA) >>> SHIFT_METADATA);
     }
 
     /**
