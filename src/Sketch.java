@@ -1,5 +1,6 @@
 import java.util.HashMap;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 import processing.core.PApplet;
 import processing.core.PFont;
@@ -21,9 +22,8 @@ public class Sketch extends PApplet {
      * Type: Particle Type (for special behaviour if applicable)
      *      0 represents air
      *      -127 represents a barrier floor (basically cells outside the canvas range to prevent the cell from escaping)
-     * Metadata (just borrowed the rest of the bits from the gravity byte, dont mind me)
-     *      xx000000 00000000 00000000
-     *      storing data about the cell i guess. could be useful for keeping track of stuff
+     * Metadata: storing data about the cell i guess. could be useful for keeping track of stuff
+     *      00000000 00000000 00000000
      * State and Rules (aka. flags) (the state of the cell and some rules that all cells probably have in common)
      *      See below for misc flags. start at {@link #MASK_TICKED}
      */
@@ -69,7 +69,7 @@ public class Sketch extends PApplet {
     public boolean canInteractCanvas = true;
 
     public int brushRadius = 2;
-    public long[][] canvas;  // x then y
+    public long[][] canvas;
     public int canvasX = 25;
     public int canvasY = 25;
     public int canvasWidth = 100;
@@ -92,13 +92,45 @@ public class Sketch extends PApplet {
     public final byte TYPE_LAVA = 3;
     public final byte TYPE_GRASS = 4;
     public final byte TYPE_COBBLESTONE = 5;
-    public final byte TYPE_RAINBOW_SAND = 6;
+    public final byte TYPE_RAINBOW_SAND = 8;
     public final byte TYPE_BARRIER = -128;
 
     public final long CELL_AIR = cellEncodeData(true, color(0), TYPE_AIR, 0, (byte)(MASKC_FLOATING_DISPLACEABLE));
     public final long CELL_BARRIER_FLOOR = cellEncodeData(true, color(0), TYPE_BARRIER, 0, (byte)(MASK_INDESTRUCTABLE | MASKC_NATURALLY_IMMOVABLE | MASK_TICKED));
 
-    public byte selectedType = TYPE_SAND;
+    public byte selectedType = TYPE_RAINBOW_SAND;
+
+    public final Supplier<Integer> PALETTE_SAND = colorGeneratePaletteRandomizer(
+        color(246, 215, 176),
+        color(242, 210, 169),
+        color(236, 204, 162),
+        color(231, 196, 150),
+        color(225, 191, 146)
+    );
+
+    public final Supplier<Integer> PALETTE_WATER = colorGeneratePaletteRandomizer(
+        color(15, 94, 156),
+        color(35, 137, 218),
+        color(28, 163, 236),
+        color(90, 188, 216),
+        color(116, 204, 244)
+    );
+
+    public final Supplier<Integer> PALETTE_LAVA = colorGeneratePaletteRandomizer(
+        color(255, 37, 0),
+        color(255, 102, 0),
+        color(242, 242, 23),
+        color(234, 92, 15),
+        color(229, 101, 32)
+    );
+
+    public final Supplier<Integer> PALETTE_COBBLESTONE = colorGeneratePaletteRandomizer(
+        color(176, 179, 184),
+        color(107, 110, 114),
+        color(209, 211, 214),
+        color(228, 230, 233),
+        color(163, 166, 173)
+    );
 
     public static void main(String[] args) {
         PApplet.main("Sketch");
@@ -114,6 +146,8 @@ public class Sketch extends PApplet {
     public void setup() {
         fontEmoji = createFont("font/NotoEmoji.ttf", 20);
         fontDefault = createFont("SansSerif", 12);
+
+        colorMode(HSB, 360, 100, 100);
         registerCellTypes();
     }
 
@@ -147,11 +181,26 @@ public class Sketch extends PApplet {
     }
 
     public void renderDebuggers() {
-        // fps
+        String debugText = String.format("FPS: %d", (int)frameRate);
+
+        // cell information
+        Integer[] pos = canvasXYFromMouse(canvasX, canvasY, null);
+        if (Objects.nonNull(pos)) {
+            debugText += String.format("\nHovering Over: %d, %d", pos[0], pos[1]);
+            debugText += "\nCell Data: ";
+
+            String cell = Long.toBinaryString(canvas[pos[0]][pos[1]]);
+            cell = "0".repeat(64 - cell.length()) + cell;
+            
+            for (int i = 0; i < 64; i += 8) {
+                debugText += cell.substring(i, i + 8) + " ";
+            }
+        }
+
         textFont(fontDefault);
         fill(255);
         textAlign(LEFT, TOP);
-        text(String.format("FPS: %d", (int)frameRate), 0, 0);
+        text(debugText, 0, 0);
     }
 
     /**
@@ -331,11 +380,10 @@ public class Sketch extends PApplet {
 
     public void renderStatusBar() {
         push();
-        colorMode(RGB, 255, 255, 255);
         translate(0, height - statusbarHeight);
 
         // top seperator
-        fill(200);
+        fill(0, 0, 78);
         rect(0, -statusbarSeperatorWidth, width, statusbarSeperatorWidth);
 
         // body
@@ -345,16 +393,16 @@ public class Sketch extends PApplet {
         textFont(fontEmoji);
         textAlign(CENTER, CENTER);
         if (runSimulation) {  // play
-            fill(82, 183, 136);
+            fill(152, 55, 72);
             square(0, 0, statusbarHeight);
 
-            fill(255);
+            fill(0, 0, 100);
             text("▶", statusbarHeight / 2f, statusbarHeight / 2f);
         } else {  // pause
-            fill(204, 2, 2);
+            fill(0, 99, 80);
             square(0, 0, statusbarHeight);
             
-            fill(255);
+            fill(0, 0, 100);
             text("⏸", statusbarHeight / 2f, statusbarHeight / 2f);
         }
 
@@ -365,24 +413,24 @@ public class Sketch extends PApplet {
         text(">", statusbarHeight / 2f, statusbarHeight / 2f);
 
         // seperator vertical
-        fill(200);
+        fill(0, 0, 78);
         rect(statusbarHeight, 0, statusbarSeperatorWidth, statusbarHeight);
         
         // selected tool
         translate(statusbarSeperatorWidth + statusbarHeight, 0);
-        fill(255);
+        fill(0, 0, 100);
         square(selectedTool * statusbarHeight, 0, statusbarHeight);
 
         // tool render
         textAlign(CENTER, CENTER);
         textFont(fontEmoji, 25);
         for (int i = 0; i < toolSymbols.length; i++) {
-            fill(i == selectedTool ? 0 : 255);
+            fill(0, 0, i == selectedTool ? 0 : 255);
             text(toolSymbols[i], (statusbarHeight / 2f) + (statusbarHeight * i), (statusbarHeight / 2f));
         }
 
         // seperator vertical
-        fill(200);
+        fill(0, 0, 78);
         translate((toolSymbols.length - 1) * statusbarHeight, 0);
         rect(statusbarHeight, 0, statusbarSeperatorWidth, statusbarHeight);
 
@@ -391,13 +439,13 @@ public class Sketch extends PApplet {
         translate(width - statusbarHeight, height - statusbarHeight);
 
         // help button
-        fill(255);
+        fill(0, 0, 100);
         textAlign(CENTER, CENTER);
         textFont(fontDefault, 25);
         text("❓", statusbarHeight / 2f, statusbarHeight / 2f);
 
         // seperator vertical
-        fill(200);
+        fill(0, 0, 78);
         rect(-statusbarSeperatorWidth, 0, statusbarSeperatorWidth, statusbarHeight);
 
         pop();
@@ -405,19 +453,23 @@ public class Sketch extends PApplet {
 
     /** tick all the cells in the canvas */
     public void cellTickAll() {
+        // int count = 0;
         for (int x = 0; x < canvasWidth; x++) {
             for (int y = 0; y < canvasHeight; y++) {
                 long cell = canvas[x][y];
                 if (!cellIsFlagOn(cell, MASK_TICKED)) cellTick(cell, x, y, true);
             }
         }
-
+        
+        
         long resetTickedFlag = ~MASK_TICKED;
         for (int x = 0; x < canvasWidth; x++) {
             for (int y = 0; y < canvasHeight; y++) {
                 canvas[x][y] &= resetTickedFlag;
+                // if (cellGetType(canvas[x][y]) != TYPE_AIR) count++;
             }
         }
+        // System.out.println(count);
     }
 
     /**
@@ -458,7 +510,7 @@ public class Sketch extends PApplet {
      */
     public void typeRegister(String name, byte uniqueID, TypeCellCreate creator, TypeCellTick ticker) {
         if (typeNames.containsKey(name)) throw new RuntimeException(String.format("type of name \"%s\" exists", name));
-        if (typeCellCreate.containsKey(uniqueID) || typeCellTick.containsKey(uniqueID)) throw new RuntimeException(String.format("id %d is already reserved, cannot assign \"%s\"", name));
+        if (typeCellCreate.containsKey(uniqueID) || typeCellTick.containsKey(uniqueID)) throw new RuntimeException(String.format("id %d is already reserved, cannot assign \"%s\"", uniqueID, name));
 
         typeNames.put(name, uniqueID);
         typeCellCreate.put(uniqueID, creator);
@@ -523,10 +575,31 @@ public class Sketch extends PApplet {
         long cellAdj = cellAtXYSafe(x + relX, y);
         int direction = cellSwapDirection(cell);
 
-        return cellIsFlagOn(cellAtXYSafe(x + relX, targetY), MASK_CAN_SWAP_WITH_ANY)
-            && cellIsFlagOn(cellAdj, MASK_CAN_SWAP_WITH_ANY)
-            && cellSwapDirection(cellAdj) != direction
-            && cellMoveRelativeInternal(x, y, relX, relY);
+        boolean canAdjacentDisplace;
+        boolean canTargetYDisplace;
+
+        if (relX == 0) {
+            canAdjacentDisplace = true;
+        } else {
+            canAdjacentDisplace = cellIsFlagOn(cellAdj, MASK_CAN_SWAP_WITH_ANY)
+                                    && cellSwapDirection(cellAdj) != direction;
+        }
+
+        if (relY == 0) {
+            canTargetYDisplace = true;
+        } else {
+            canTargetYDisplace = cellIsFlagOn(cellAtXYSafe(x + relX, targetY), MASK_CAN_SWAP_WITH_ANY);
+        }
+
+        if (
+            canAdjacentDisplace
+            && canTargetYDisplace
+        ) {
+            cellMoveRelativeInternal(x, y, relX, relY);
+            return true;
+        } else {
+            return false;
+        }
     }
 
     /**
@@ -540,7 +613,7 @@ public class Sketch extends PApplet {
         int cellDirection = cellSwapDirection(cell);
         long cellBelow = cellAtXYSafe(x, y + 1);
         int cellBelowDirection = cellSwapDirection(cellBelow);
-        final int netDirection = Math.abs(cellDirection + cellBelowDirection);
+        int netDirection = Math.abs(cellDirection + cellBelowDirection);
 
         // both cells must be able to swap, both cannot move in the same direction, the cell below cannot be ticked
         if (cellIsFlagOn(cell & cellBelow, MASK_SELF_CANT_SWAP)) return false;
@@ -558,7 +631,10 @@ public class Sketch extends PApplet {
         if (
             (isSameType && isColliding && isBothSwappable)
             || (displaceablePresent && canMutuallySwap)
-        ) return cellMoveRelativeInternal(x, y, 0, 1);
+        ) {
+            cellMoveRelativeInternal(x, y, 0, 1);
+            return true;
+        }
 
         return false;
     }
@@ -627,7 +703,6 @@ public class Sketch extends PApplet {
     public void cellRenderCanvas(int canvasX, int canvasY) {
         noStroke();
         background(128);
-        colorMode(HSB, 360, 100, 100);
 
         translate(canvasX, canvasY);
         for (int x = 0; x < canvasWidth; x++) {
@@ -652,7 +727,9 @@ public class Sketch extends PApplet {
      */
     public boolean cellMoveAbsolute(int x, int y, int targetX, int targetY) {
         if (cellIsFlagOn(canvas[x][y], MASK_SELF_CANT_SWAP)) return false;
-        return cellMoveAbsoluteInternal(x, y, targetX, targetY);
+        cellMoveAbsoluteInternal(x, y, targetX, targetY);
+        
+        return true;
     }
 
     /**
@@ -667,32 +744,31 @@ public class Sketch extends PApplet {
      */
     public boolean cellMoveRelative(int x, int y, int relX, int relY) {
         if (cellIsFlagOn(canvas[x][y], MASK_SELF_CANT_SWAP)) return false;
-        return cellMoveAbsoluteInternal(x, y, x + relX, y + relY);
+        cellMoveAbsoluteInternal(x, y, x + relX, y + relY);
+
+        return true;
     }
 
     /**
      * Move the cell.
      *      <br> NOTE: this function will move the cell regardless if it has {@link #MASK_SELF_CANT_SWAP}.
      *      <br>       type handlers should use {@link #cellMoveAbsolute(int, int, int, int)} or {@link #cellMoveRelative(int, int, int, int)}
-     *      <br> NOTE: this function will only check if the target exists. it assumes that (x, y) are valid coordinates
+     *      <br> NOTE: this function assumes both coordinates are valid
      *      <br> NOTE: if the target has not ticked yet it will tick
      * @param x cell at the x position
      * @param y cell at the y position
      * @param targetX the resulting x position to move the cell to
      * @param targetY the resulting y position to move the cell to
-     * @return true indicating a success at moving the cell, false otherwise
      * @see #cellMoveRelativeInternal(int, int, int, int)
      */
-    public boolean cellMoveAbsoluteInternal(int x, int y, int targetX, int targetY) {
+    public void cellMoveAbsoluteInternal(int x, int y, int targetX, int targetY) {
         long inital = canvas[x][y];
-        long target = cellAtXYSafe(targetX, targetY);
+        long target = canvas[targetX][targetY];
         
         canvas[x][y] = target;
         canvas[targetX][targetY] = inital;
 
         if (!cellIsFlagOn(target, MASK_TICKED)) cellTick(target, x, y, false);
-
-        return true;
     }
 
     /**
@@ -702,11 +778,10 @@ public class Sketch extends PApplet {
      * @param y cell at the y position
      * @param relX how much to move the cell on the x axis
      * @param relY how much to move the cell on the y axis
-     * @return true indicating a success at moving the cell, false otherwise
      * @see #cellMoveAbsoluteInternal(int, int, int, int)
      */
-    public boolean cellMoveRelativeInternal(int x, int y, int relX, int relY) {
-        return cellMoveAbsoluteInternal(x, y, x + relX, y + relY);
+    public void cellMoveRelativeInternal(int x, int y, int relX, int relY) {
+        cellMoveAbsoluteInternal(x, y, x + relX, y + relY);
     }
 
     /**
@@ -759,10 +834,67 @@ public class Sketch extends PApplet {
     public void registerCellTypes() {
         typeRegister("Air", TYPE_AIR, (x, y) -> CELL_AIR, (cell, x, y) -> {});
 
-        // color hsl(38, 52%, 78%)
         typeRegister("Sand", TYPE_SAND,
-            (x, y) -> cellEncodeData(false, color(38, 52, 78), TYPE_SAND, 0, (byte)MASK_CAN_SHUFFLE)
+            (x, y) -> cellEncodeData(false, PALETTE_SAND.get(), TYPE_SAND, 0, (byte)MASK_CAN_SHUFFLE)
         , (cell, x, y) -> {});
+
+        typeRegister("Water", TYPE_WATER, 
+            (x, y) -> cellEncodeData(false, PALETTE_WATER.get(), TYPE_WATER, 1, (byte)(MASK_CAN_SHUFFLE))
+        , (cell, x, y) -> {
+            if (!cellIsFlagOn(cell, MASK_OTHERS_SHUFFLE_ON)) return;
+            short direction = (short)cellGetMetadata(cell);
+            if (cellShuffle(cell, x, y, direction, 0)) return;
+
+            long removeMetadata = ~MASK_METADATA;
+            long addMetadata = cellEncodeCreateMetadata((short)-direction);
+            canvas[x][y] = (cell & removeMetadata) | addMetadata;
+        });
+
+
+        typeRegister("Lava", TYPE_LAVA, 
+            (x, y) -> cellEncodeData(false, PALETTE_LAVA.get(), TYPE_LAVA, 1, (byte)(MASK_CAN_SHUFFLE))
+        , (cell, x, y) -> {
+            if (!cellIsFlagOn(cell, MASK_OTHERS_SHUFFLE_ON)) return;
+            short direction = (short)cellGetMetadata(cell);
+            if (cellShuffle(cell, x, y, direction, 0)) return;
+
+            long removeMetadata = ~MASK_METADATA;
+            long addMetadata = cellEncodeCreateMetadata((short)-direction);
+            canvas[x][y] = (cell & removeMetadata) | addMetadata;
+        });
+
+        typeRegister("Cobblestone", TYPE_COBBLESTONE, 
+            (x, y) -> cellEncodeData(false, PALETTE_COBBLESTONE.get(), TYPE_COBBLESTONE, 1, (byte)0)
+        , (cell, x, y) -> {});
+
+        typeRegister("Rainbow Sand", TYPE_RAINBOW_SAND, (x, y) -> {
+            int hue = ((x + y) + (frameCount / 2)) % 360;
+            return cellEncodeData(false, color(hue, 100, 100), TYPE_RAINBOW_SAND, 0, (byte)MASK_CAN_SHUFFLE);
+        }, (cell, x, y) -> {
+            if (frameCount % 2 != 0) return;
+
+            int cellColor = cellGetColor(cell);
+            float chan1 = (hue(cellColor) + 1) % 360;
+            float chan2 = saturation(cellColor);
+            float chan3 = brightness(cellColor);
+
+            long removeColor = ~MASK_COLOR;
+            canvas[x][y] = (cell & removeColor) | cellEncodeCreateColor(color(chan1, chan2, chan3));
+        });
+    }
+
+    public long cellEncodeCreateColor(int color) {
+        final int rightThreeBytes = 16777215;
+        return Integer.toUnsignedLong(color & rightThreeBytes) << SHIFT_COLOR;
+    }
+
+    public long cellEncodeCreateMetadata(int metadata) {
+        final int rightThreeBytes = 16777215;
+        return Integer.toUnsignedLong(metadata & rightThreeBytes) << SHIFT_METADATA;
+    }
+
+    public Supplier<Integer> colorGeneratePaletteRandomizer(int... color) {
+        return () -> color[(int)random(color.length)];
     }
 
     /**
