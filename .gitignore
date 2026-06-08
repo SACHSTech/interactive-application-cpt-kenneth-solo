@@ -22,3 +22,5 @@ out/
 bin/*
 !bin/.gitkeep
 target/
+
+.vscode/settings.json

@@ -1,4 +1,5 @@
 import java.util.HashMap;
+import java.util.Objects;
 
 import processing.core.PApplet;
 import processing.core.PFont;
@@ -55,8 +56,8 @@ public class Sketch extends PApplet {
     public final long MASKC_NATURALLY_IMMOVABLE = MASK_SELF_CANT_SWAP | MASK_OTHERS_SHUFFLE_ON;
     public final long MASKC_FLOATING_DISPLACEABLE = MASK_SELF_CANT_SWAP | MASK_CAN_SWAP_WITH_ANY;
 
-    public final int TOOL_BRUSH_FILL = 0;
-    public final int TOOL_BRUSH_FILL_OVERRIDE = 1;
+    public final int TOOL_BRUSH_REPLACE_AIR = 0;
+    public final int TOOL_BRUSH_REPLACE_ALL = 1;
     public final int TOOL_BRUSH_ERASE = 2;
     public final int TOOL_INSPECT = 3;
     public int selectedTool = 0;
@@ -71,11 +72,12 @@ public class Sketch extends PApplet {
     public long[][] canvas;  // x then y
     public int canvasX = 25;
     public int canvasY = 25;
-    public int canvasWidth = 100 * 2;
-    public int canvasHeight = 60 * 2;
+    public int canvasWidth = 100;
+    public int canvasHeight = 60;
     public int sandSize = 5;
 
-    public HashMap<Byte, TypeHandler> typeHandler = new HashMap<>();
+    public HashMap<Byte, TypeCellCreate> typeCellCreate = new HashMap<>();
+    public HashMap<Byte, TypeCellTick> typeCellTick = new HashMap<>();
     public HashMap<String, Byte> typeNames = new HashMap<>();
 
     public int statusbarSeperatorWidth = 5;
@@ -84,11 +86,19 @@ public class Sketch extends PApplet {
     public PFont fontEmoji;
     public PFont fontDefault;
 
-    // TODO: subjected for removal (temorary testing)
-    public int count = 0;
+    public final byte TYPE_AIR = 0;
+    public final byte TYPE_SAND = 1;
+    public final byte TYPE_WATER = 2;
+    public final byte TYPE_LAVA = 3;
+    public final byte TYPE_GRASS = 4;
+    public final byte TYPE_COBBLESTONE = 5;
+    public final byte TYPE_RAINBOW_SAND = 6;
+    public final byte TYPE_BARRIER = -128;
 
-    public final long CELL_AIR = cellEncodeData(true, color(0), (byte)0, 0, (byte)(MASKC_FLOATING_DISPLACEABLE));
-    public final long CELL_BARRIER_FLOOR = cellEncodeData(true, color(0), (byte)-128, 0, (byte)(MASK_INDESTRUCTABLE | MASKC_NATURALLY_IMMOVABLE | MASK_TICKED));
+    public final long CELL_AIR = cellEncodeData(true, color(0), TYPE_AIR, 0, (byte)(MASKC_FLOATING_DISPLACEABLE));
+    public final long CELL_BARRIER_FLOOR = cellEncodeData(true, color(0), TYPE_BARRIER, 0, (byte)(MASK_INDESTRUCTABLE | MASKC_NATURALLY_IMMOVABLE | MASK_TICKED));
+
+    public byte selectedType = TYPE_SAND;
 
     public static void main(String[] args) {
         PApplet.main("Sketch");
@@ -97,7 +107,6 @@ public class Sketch extends PApplet {
     @Override
     public void settings() {
         size(canvasWidth * sandSize + 50, canvasHeight * sandSize + (sandSize + 40) + 50);
-
         canvasInit(canvasWidth, canvasHeight);
     }
 
@@ -105,6 +114,7 @@ public class Sketch extends PApplet {
     public void setup() {
         fontEmoji = createFont("font/NotoEmoji.ttf", 20);
         fontDefault = createFont("SansSerif", 12);
+        registerCellTypes();
     }
 
     @Override
@@ -124,6 +134,17 @@ public class Sketch extends PApplet {
 
         if (debuggingMetrics) renderDebuggers();
     }
+    
+    @Override
+    public void mouseDragged(MouseEvent event) {
+        toolApplyOnCanvas(event);
+    }
+
+    @Override
+    public void mousePressed(MouseEvent event) {
+        if (canInteractStatusBar) handleStatusBarMouse(event.getX(), event.getY());
+        toolApplyOnCanvas(event);
+    }
 
     public void renderDebuggers() {
         // fps
@@ -138,13 +159,13 @@ public class Sketch extends PApplet {
      * @param canvasX where the canvas has been rendered on the x axis
      * @param canvasY where the canvas has been rendered on the y axis
      * @param event mouse coordinates if mouseX and mouseY is unreliable, if you dont have this just pass in null
-     * @return updated x and y coordinates. [x, y]
+     * @return updated x and y coordinates. (x, y)
      */
     public Integer[] canvasXYFromMouse(int canvasX, int canvasY, MouseEvent event) {
         int mouseX = this.mouseX;
         int mouseY = this.mouseY;
 
-        if (event != null) {
+        if (Objects.nonNull(event)) {
             mouseX = event.getX();
             mouseY = event.getY();
         }
@@ -163,54 +184,42 @@ public class Sketch extends PApplet {
         return new Integer[]{x, y};
     }
 
-    @Override
-    public void mouseDragged(MouseEvent event) {
-        Integer[] pos = canvasXYFromMouse(canvasX, canvasY, event);
-        if (pos == null) return;
-
-        int mouseX = pos[0];
-        int mouseY = pos[1];
-        
-        // TODO: get rid of hue and replace with something else
-        int hue = count++ % 360;
-        
-        int xRightBounds = Math.clamp(mouseX + brushRadius, 0, canvasWidth - 1) ;
-        int yDownBounds = Math.clamp(mouseY + brushRadius, 0, canvasHeight - 1) ;
-
-        long cell = cellEncodeData(
-            true, color(hue, 255, 255),
-            (byte)(keyPressed && keyCode == SHIFT ? 2 : 1),
-            0,
-            (byte)((MASK_CAN_SHUFFLE)
-            | (count % 2 == 0 ? MASK_SWAP_UP : 0)
-            | (keyPressed && keyCode == CONTROL ? MASKC_NATURALLY_IMMOVABLE : 0)
-        ));
-
-        // brush handler
-        for (int x = Math.clamp(mouseX - brushRadius, 0, canvasWidth - 1); x <= xRightBounds; x++) {
-            for (int y = Math.clamp(mouseY - brushRadius, 0, canvasHeight - 1); y <= yDownBounds; y++) {
-                if (selectedTool == TOOL_BRUSH_FILL && cellGetType(canvas[x][y]) == 0) {
-                    canvas[x][y] = cell;
-                } else if (selectedTool == TOOL_BRUSH_FILL_OVERRIDE) {
-                    canvas[x][y] = cell;
-                } else if (selectedTool == TOOL_BRUSH_ERASE) {
-                    canvas[x][y] = CELL_AIR;
-                }
-            }
-        }
-    }
-
-    @Override
-    public void mousePressed(MouseEvent event) {
-        if (canInteractStatusBar) handleStatusBarMouse(event.getX(), event.getY());
-    }
-
     public void canvasInit(int width, int height) {
         canvas = new long[width][height];
 
         for (int x = 0; x < canvasWidth; x++) {
             for (int y = 0; y < canvasHeight; y++) {
                 canvas[x][y] = CELL_AIR;
+            }
+        }
+    }
+
+    public void toolApplyOnCanvas(MouseEvent event) {
+        Integer[] pos = canvasXYFromMouse(canvasX, canvasY, event);
+        if (Objects.isNull(pos)) return;
+
+        toolApplyOnCanvas(pos[0], pos[1]);
+    }
+
+    public void toolApplyOnCanvas(int canvasX, int canvasY) {
+        final int xBeginBrush = Math.clamp(canvasX - brushRadius, 0, canvasWidth - 1);
+        final int yBeginBrush = Math.clamp(canvasY - brushRadius, 0, canvasHeight - 1);
+        final int xEndBrush = Math.clamp(canvasX + brushRadius, 0, canvasWidth - 1) ;
+        final int yEndBrush = Math.clamp(canvasY + brushRadius, 0, canvasHeight - 1) ;
+
+        TypeCellCreate creator = typeCellCreate.get(selectedType);
+
+        // brush handler
+        for (int x = xBeginBrush; x <= xEndBrush; x++) {
+            for (int y = yBeginBrush; y <= yEndBrush; y++) {
+                if (
+                    (selectedTool == TOOL_BRUSH_REPLACE_AIR && cellGetType(canvas[x][y]) == TYPE_AIR)
+                    || (selectedTool == TOOL_BRUSH_REPLACE_ALL)
+                ) {
+                    canvas[x][y] = creator.create(x, y);
+                } else if (selectedTool == TOOL_BRUSH_ERASE) {
+                    canvas[x][y] = CELL_AIR;
+                }
             }
         }
     }
@@ -240,15 +249,13 @@ public class Sketch extends PApplet {
     public void setCursor() {
         if (mouseX >= 0 && mouseX <= width && mouseY < height && mouseY >= height - statusbarHeight) {
             final int toolBarBegin = (statusbarHeight * 2) + statusbarSeperatorWidth;
-            final int toolBarEnd = (((statusbarHeight * 2) + statusbarSeperatorWidth) + (statusbarHeight * toolSymbols.length));
-            final int runStepEnd = (statusbarHeight * 2);
-            final int helpStart = width - statusbarHeight;
+            final int toolBarEnd = toolBarBegin + (statusbarHeight * toolSymbols.length);
+            
+            final boolean hoveringTools = (mouseX >= toolBarBegin && mouseX <= toolBarEnd);
+            final boolean hoveringRunStep = mouseX <= (statusbarHeight * 2);
+            final boolean hoveringHelp = mouseX > width - statusbarHeight;
 
-            if (
-                mouseX <= runStepEnd
-                || (mouseX >= toolBarBegin && mouseX <= toolBarEnd)
-                || mouseX > helpStart
-            ) {
+            if (hoveringRunStep || hoveringTools || hoveringHelp) {
                 cursor(HAND);
             } else {
                 cursor(ARROW);
@@ -268,7 +275,7 @@ public class Sketch extends PApplet {
         int x = mouseX;
         int y = mouseY;
 
-        if (event != null) {
+        if (Objects.nonNull(event)) {
             x = event.getX();
             y = event.getY();
         }
@@ -289,7 +296,7 @@ public class Sketch extends PApplet {
     public void renderToolOverlay(int canvasX, int canvasY, int radius) {
         if (canvasIsMouseOutside(canvasX, canvasY, null)) return;
         Integer[] pos = canvasXYFromMouse(canvasX, canvasY, null);
-        if (pos == null) return;
+        if (Objects.isNull(pos)) return;
         
         int x = pos[0];
         int y = pos[1];
@@ -435,9 +442,9 @@ public class Sketch extends PApplet {
             }
         }
 
-        TypeHandler handler = typeHandler.get(cellGetType(cell));
-        if (handler != null) {
-            handler.run(cell, x, y, true, false);
+        TypeCellTick handler = typeCellTick.get(cellGetType(cell));
+        if (Objects.nonNull(handler)) {
+            handler.tick(cell, x, y);
         }
     }
 
@@ -445,16 +452,17 @@ public class Sketch extends PApplet {
      * Register the type with the cell system
      * @param name common name to associate with this type (no it doesn't have to be a fancy name in the code base. eg. {@code namespace:name}. this value will be presented to the end user)
      * @param uniqueID unique id for the type
-     * @param handler the type handler. see {@link TypeHandler}
+     * @param handler the type handler. see {@link TypeCellTick}
      * @throws Exception will throw hands if name is already taken or uniqueID has already been reserved 
-     * @see TypeHandler
+     * @see TypeCellTick
      */
-    public void typeRegister(String name, byte uniqueID, TypeHandler handler) throws Exception {
-        if (typeNames.containsKey(name)) throw new Exception(String.format("type of name \"%s\" exists", name));
-        if (typeHandler.containsKey(uniqueID)) throw new Exception(String.format("id %d is already reserved, cannot assign \"%s\"", name));
+    public void typeRegister(String name, byte uniqueID, TypeCellCreate creator, TypeCellTick ticker) {
+        if (typeNames.containsKey(name)) throw new RuntimeException(String.format("type of name \"%s\" exists", name));
+        if (typeCellCreate.containsKey(uniqueID) || typeCellTick.containsKey(uniqueID)) throw new RuntimeException(String.format("id %d is already reserved, cannot assign \"%s\"", name));
 
         typeNames.put(name, uniqueID);
-        typeHandler.put(uniqueID, handler);
+        typeCellCreate.put(uniqueID, creator);
+        typeCellTick.put(uniqueID, ticker);
     }
 
     /**
@@ -463,7 +471,7 @@ public class Sketch extends PApplet {
      * @param x cell x on canvas
      * @param y cell y on canvas
      * @param direction where the cell is moving towards according to gravity rule (see above for sector)
-     * @return updated x and y coordinates. [x, y]
+     * @return updated x and y coordinates. (x, y)
      */
     public Integer[] cellApplyShuffling(long cell, int x, int y) {
         // when shuffling:
@@ -532,26 +540,25 @@ public class Sketch extends PApplet {
         int cellDirection = cellSwapDirection(cell);
         long cellBelow = cellAtXYSafe(x, y + 1);
         int cellBelowDirection = cellSwapDirection(cellBelow);
-        int netDirection = cellDirection + cellBelowDirection;
+        final int netDirection = Math.abs(cellDirection + cellBelowDirection);
 
         // both cells must be able to swap, both cannot move in the same direction, the cell below cannot be ticked
         if (cellIsFlagOn(cell & cellBelow, MASK_SELF_CANT_SWAP)) return false;
-        if (Math.abs(netDirection) == 2) return false;
+        if (netDirection == 2) return false;
         if (cellIsFlagOn(cellBelow, MASK_TICKED)) return false;
         
-        final boolean isSameType = cellGetType(cell) == cellGetType(cellBelow);
-        final boolean isBothSwappable = !cellIsFlagOn(cell | cellBelow, MASK_SELF_CANT_SWAP);
-        final boolean isColliding = Math.abs(netDirection) == 0 && cellIsFlagOn(cellBelow, MASK_SWAP_UP);
+        final boolean isSameType =              cellGetType(cell) == cellGetType(cellBelow);
+        final boolean isBothSwappable =         !cellIsFlagOn(cell | cellBelow, MASK_SELF_CANT_SWAP);
+        final boolean isColliding =             netDirection == 0 && cellIsFlagOn(cellBelow, MASK_SWAP_UP);
 
-        final boolean canMutuallySwap = (cellIsFlagOn(cell, MASK_CAN_SWAP_WITH_ANY) && cellBelowDirection == -1)
-                                        || (cellDirection == 1 && cellIsFlagOn(cellBelow, MASK_CAN_SWAP_WITH_ANY));
-        final boolean displaceablePresent = Math.abs(netDirection) == 1;
+        final boolean canMutuallySwap =         (cellIsFlagOn(cell, MASK_CAN_SWAP_WITH_ANY) && cellBelowDirection == -1)
+                                                || (cellDirection == 1 && cellIsFlagOn(cellBelow, MASK_CAN_SWAP_WITH_ANY));
+        final boolean displaceablePresent =     netDirection == 1;
 
-        if (isSameType && isColliding && isBothSwappable) {
-            return cellMoveRelativeInternal(x, y, 0, 1);
-        } else if (displaceablePresent && canMutuallySwap) {
-            return cellMoveRelativeInternal(x, y, 0, 1);
-        }
+        if (
+            (isSameType && isColliding && isBothSwappable)
+            || (displaceablePresent && canMutuallySwap)
+        ) return cellMoveRelativeInternal(x, y, 0, 1);
 
         return false;
     }
@@ -596,10 +603,10 @@ public class Sketch extends PApplet {
     }
 
     /**
-     * checks if [x, y] is within the canvas bounds
+     * checks if (x, y) is within the canvas bounds
      * @param x the x axis to check
      * @param y the y axis to check
-     * @return true if [x, y] is within the canvas bounds, else otherwise
+     * @return true if (x, y) is within the canvas bounds, else otherwise
      */
     public boolean canvasIsCoordinatesOutOfBounds(int x, int y) {
         return (x < 0 || x >= canvasWidth) || (y < 0 || y >= canvasHeight);
@@ -620,7 +627,7 @@ public class Sketch extends PApplet {
     public void cellRenderCanvas(int canvasX, int canvasY) {
         noStroke();
         background(128);
-        colorMode(HSB, 255, 255, 255);
+        colorMode(HSB, 360, 100, 100);
 
         translate(canvasX, canvasY);
         for (int x = 0; x < canvasWidth; x++) {
@@ -749,30 +756,34 @@ public class Sketch extends PApplet {
         return (int)((cell & MASK_METADATA) >>> SHIFT_METADATA);
     }
 
+    public void registerCellTypes() {
+        typeRegister("Air", TYPE_AIR, (x, y) -> CELL_AIR, (cell, x, y) -> {});
+
+        // color hsl(38, 52%, 78%)
+        typeRegister("Sand", TYPE_SAND,
+            (x, y) -> cellEncodeData(false, color(38, 52, 78), TYPE_SAND, 0, (byte)MASK_CAN_SHUFFLE)
+        , (cell, x, y) -> {});
+    }
+
     /**
-     * Cells have a type assigned to them, this function allows the assignment of special behaviours to these types
-     * @param cell cell data, only use this if executeTick is true
+     * This function will handle cell creation
      * @param x cell's x position
      * @param y cell's y position
-     * @param executeTick this cell is ticking at (x, y), do something with it
-     * @param executeCreate the cell wants to be created at (x, y)
+     * @returns cell data to place at (x, y)
      */
     @FunctionalInterface
-    public interface TypeHandler {
-        void run(long cell, int x, int y, boolean executeTick, boolean executeCreate);
+    public interface TypeCellCreate {
+        long create(int x, int y);
+    }
+
+    /**
+     * This function will tick the cell at (x, y)
+     * @param cell cell's data at (x, y)
+     * @param x cell's x position
+     * @param y cell's y position
+     */
+    @FunctionalInterface
+    public interface TypeCellTick {
+        void tick(long cell, int x, int y);
     }
 }
-
-// cell debugger
-        // if (keyPressed && !waitingRelease) {
-        //     waitingRelease = true;
-        //     String cell = Long.toBinaryString(cellAtXYSafe(this.mouseX / sandSize, this.mouseY / sandSize));
-        //     cell = " ".repeat(64 - cell.length()) + cell;
-            
-        //     for (int i = 0; i < 64; i += 8) {
-        //         System.out.print(cell.substring(i, i + 8) + " ");
-        //     }
-        //     System.out.println();
-        // } else if (!keyPressed && waitingRelease) {
-        //     waitingRelease = false;
-        // }
