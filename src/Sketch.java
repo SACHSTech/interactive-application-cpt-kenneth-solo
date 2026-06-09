@@ -17,7 +17,7 @@ public class Sketch extends PApplet {
      * 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
      * <------[rgb / hsb]------->  Type    <-------[metadata]------->  |<State and Rules (aka. flags)
      * 
-     * Red, Green, Blue: Particle Color (this channel can also support hsb) (we are cutting the first bit for a flag)
+     * Red, Green, Blue: Particle Color (this channel can also support hsb)
      * Type: Particle Type (for special behaviour if applicable)
      * Metadata: storing data about the cell i guess. could be useful for keeping track of stuff
      *      00000000 00000000 00000000
