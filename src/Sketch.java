@@ -267,6 +267,7 @@ public class Sketch extends PApplet {
             int index = Math.clamp(brushSelectionScrollAt + i, 0, numberOfTypesIndexes);
             String textToRender = cellNames[index];
             
+            // input handler
             final boolean mouseWithinX = mouseX >= xOffset;
             final boolean mouseWithinSelectionY = mouseY >= i * textHeight && mouseY <= (i + 1) * textHeight;
             if (mousePressed && mouseWithinX && mouseWithinSelectionY) selectedType = typeNames.get(cellNames[index]);
@@ -509,15 +510,10 @@ public class Sketch extends PApplet {
         // cell information
         Integer[] pos = canvasXYFromMouse(canvasX, canvasY);
         if (Objects.nonNull(pos)) {
-            debugText += String.format("\nHovering Over: %d, %d", pos[0], pos[1]);
-            debugText += "\nCell Data: ";
-
-            String cell = Long.toBinaryString(canvas[pos[0]][pos[1]]);
-            cell = "0".repeat(64 - cell.length()) + cell;
-            
-            for (int i = 0; i < 64; i += 8) {
-                debugText += cell.substring(i, i + 8) + " ";
-            }
+            int x = pos[0];
+            int y = pos[1];
+            debugText += String.format("\nHovering Over: %d, %d", x, y);
+            debugText += "\nCell Data: " + debugLongToBinaryString(canvas[x][y]);
         }
 
         textFont(fontDefault);
@@ -594,6 +590,7 @@ public class Sketch extends PApplet {
             cellAhead = cellAtXYSafe(x, y + direction);
         }
 
+        long disableOthersShuffling = ~MASK_OTHERS_SHUFFLE_ON;
         if (cellIsFlagOn(cellAhead, MASK_OTHERS_SHUFFLE_ON)) {
             if (cellShuffle(cell, x, y, 1, direction)) {
                 x++;
@@ -605,7 +602,7 @@ public class Sketch extends PApplet {
                 canvas[x][y] |= MASK_OTHERS_SHUFFLE_ON;
             }
         } else {
-            canvas[x][y] &= ~MASK_OTHERS_SHUFFLE_ON;
+            canvas[x][y] &= disableOthersShuffling;
         }
 
         return new Integer[]{x, y};
@@ -990,8 +987,7 @@ public class Sketch extends PApplet {
         float chan2 = saturation(cellColor);
         float chan3 = brightness(cellColor);
 
-        long removeColor = ~MASK_COLOR;
-        canvas[x][y] = (cell & removeColor) | cellEncodeCreateColor(color(chan1, chan2, chan3));
+        cellReplaceColor(cell, x, y, color(chan1, chan2, chan3));
     }
 
     /**
@@ -1006,9 +1002,7 @@ public class Sketch extends PApplet {
         short moveDirection = (short)cellGetMetadata(cell);
         if (cellShuffle(cell, x, y, moveDirection, 0)) return moveDirection;
 
-        long removeMetadata = ~MASK_METADATA;
-        long addMetadata = cellEncodeCreateMetadata(-moveDirection);
-        canvas[x][y] = (cell & removeMetadata) | addMetadata;
+        cellReplaceMetadata(cell, x, y, -moveDirection);
         return 0;
     }
 
@@ -1060,26 +1054,37 @@ public class Sketch extends PApplet {
         return (int)((cell & MASK_METADATA) >>> SHIFT_METADATA);
     }
 
+
     /**
-     * Converts color into cell compatible data
+     * Replaces the color of the cell
+     *      <br> CAUTION: this function assumes that the coordinates (x, y) are valid
+     * @param cell cell value at (x, y)
+     * @param x cell position at x
+     * @param y cell position at y
      * @param color processing compatible color to encode
-     * @return color value that can be applied to the cell
      * @see #behaviourRainbowCell(long, int, int) Function Usage Example (Calling and Application)
      */
-    public long cellEncodeCreateColor(int color) {
+    public void cellReplaceColor(long cell, int x, int y, int color) {
         final int rightThreeBytes = 16777215;
-        return Integer.toUnsignedLong(color & rightThreeBytes) << SHIFT_COLOR;
+        long toAdd = Integer.toUnsignedLong(color & rightThreeBytes) << SHIFT_COLOR;
+
+        canvas[x][y] = (cell & ~MASK_COLOR) | toAdd;
     }
     
     /**
      * Converts metadata into cell compatible data
+     *      <br> CAUTION: this function assumes that the coordinates (x, y) are valid
+     * @param cell cell value at (x, y)
+     * @param x cell position at x
+     * @param y cell position at y
      * @param metadata metadata to encode
-     * @return metadata value that can be applied to the cell
      * @see #behaviourFluid(long, int, int) Function Usage Example (Calling and Application)
      */
-    public long cellEncodeCreateMetadata(int metadata) {
+    public void cellReplaceMetadata(long cell, int x, int y, int metadata) {
         final int rightThreeBytes = 16777215;
-        return Integer.toUnsignedLong(metadata & rightThreeBytes) << SHIFT_METADATA;
+        long toAdd = Integer.toUnsignedLong(metadata & rightThreeBytes) << SHIFT_METADATA;
+
+        canvas[x][y] = (cell & ~MASK_METADATA) | toAdd;
     }
 
     /**
@@ -1091,6 +1096,23 @@ public class Sketch extends PApplet {
      */
     public Supplier<Integer> colorGeneratePaletteRandomizer(int... color) {
         return () -> color[(int)random(color.length)];
+    }
+
+    /**
+     * Converts a long to a binary representation, where every 8 bits will be seperated by a space for visualizing each byte of the long
+     * @param value long to convert
+     * @return convert long as a binary string seperated by spaces every 8 bits
+     */
+    public String debugLongToBinaryString(long value) {
+        String toParse = Long.toBinaryString(value);
+        String result = "";
+        toParse = "0".repeat(64 - toParse.length()) + toParse;
+            
+        for (int i = 0; i < 64; i += 8) {
+            result += toParse.substring(i, i + 8) + " ";
+        }
+
+        return result.strip();
     }
 
     /**
