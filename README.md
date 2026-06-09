@@ -1,19 +1,40 @@
-[![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/wPuP5asc)
-# ICS3U CPT – Interactive Processing Project
+# Sandbox - A Sand Simulation
 
-This repository contains your ICS3U Culminating Performance Task (CPT).
+![Program Running with the text "The Sandbox"](images/program.png)
 
-### Start here:
-Please read the full project instructions in **[INSTRUCTIONS.md](INSTRUCTIONS.md)**.
+A falling sand cellular automata game.
 
-Assessment criteria for this project are described in **[ASSESSMENT.md](ASSESSMENT.md)**.
+## Usage
 
-Once you are ready to submit, replace the contents of this README.md file with:
+Use the mouse and paint the canvas with the different types of cells provided in the cell selection panel.
 
-- a screenshot of your program in action
-- a brief description of your program
-- how the user interacts with it
-- any known limitations or incomplete features
-- an attribution section for any external assets used
+`Space`: Pause or resume the simulation
+`s`: Advance the simlation by one frame
+`Shift`: Opens up the cell selection panel
+`1`: Fill tool (Paints the canvas with the selected cell, does not override existing cells)
+`2`: Brush tool (Paints the canvas with the selected cell, overrides existing cell)
+`3`: Eraser tool
+`F3`: Display debug renderers
+`Up/Down Arrow or Scroll`: Increase/decrease brush size
 
-This README will be assessed as part of the project professionalism mark.
+While the cell selection panel is open you can press `Shift` or `Esc` to close it
+
+## Features
+
+- [x] Simulation Controls (pause/play/step)
+- [x] Brushes
+  - [x] Paint
+  - [x] Erase
+- [x] Extendable Cell System
+- [x] Debug Render
+- [ ] Cell Inspection Tool
+- [ ] Help Menu
+- [ ] Resizeable Canvas
+
+## Attribution
+
+```txt
+Noto Emoji Font
+Source: https://fonts.google.com/noto/specimen/Noto+Emoji
+License: SIL Open Font License, Version 1.1
+```

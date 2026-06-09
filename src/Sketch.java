@@ -7,8 +7,6 @@ import processing.core.PFont;
 import processing.event.KeyEvent;
 import processing.event.MouseEvent;
 
-// TODO: https://fonts.google.com/noto/specimen/Noto+Emoji source font
-
 /**
  * Sand Physics Like Sandbox
  * @author directconnections
@@ -912,14 +910,14 @@ public class Sketch extends PApplet {
         typeRegister("Water", TYPE_WATER, 
             (x, y) -> cellEncodeData(PALETTE_WATER.get(), TYPE_WATER, 1, (byte)(MASK_CAN_SHUFFLE))
         , (cell, x, y) -> {
-            behaviourFluid(cell, x, y);
+            x += behaviourFluid(cell, x, y);
             behaviourCellExchange(cell, x, y, TYPE_LAVA, TYPE_COBBLESTONE);
         });
 
         typeRegister("Lava", TYPE_LAVA, 
             (x, y) -> cellEncodeData(PALETTE_LAVA.get(), TYPE_LAVA, 1, (byte)(MASK_CAN_SHUFFLE))
         , (cell, x, y) -> {
-            behaviourFluid(cell, x, y);
+            x += behaviourFluid(cell, x, y);
             behaviourCellExchange(cell, x, y, TYPE_WATER, TYPE_COBBLESTONE);
         });
 
@@ -1000,15 +998,17 @@ public class Sketch extends PApplet {
      * @param cell cell data at (x, y)
      * @param x cell x coordinates
      * @param y cell y coordinates
+     * @return a number representing how many cells it moved on the x axis.
      */
-    public void behaviourFluid(long cell, int x, int y) {
-        if (!cellIsFlagOn(cell, MASK_OTHERS_SHUFFLE_ON)) return;
+    public int behaviourFluid(long cell, int x, int y) {
+        if (!cellIsFlagOn(cell, MASK_OTHERS_SHUFFLE_ON)) return 0;
         short moveDirection = (short)cellGetMetadata(cell);
-        if (cellShuffle(cell, x, y, moveDirection, 0)) return;
+        if (cellShuffle(cell, x, y, moveDirection, 0)) return moveDirection;
 
         long removeMetadata = ~MASK_METADATA;
         long addMetadata = cellEncodeCreateMetadata(-moveDirection);
         canvas[x][y] = (cell & removeMetadata) | addMetadata;
+        return 0;
     }
 
     /**
