@@ -2,7 +2,7 @@
 
 ![Program Running with the text "The Sandbox"](images/program.png)
 
-A falling sand cellular automata game written in Java using the Processing library. Put some "sand" onto the canvas and watch it fall or do something.
+A falling sand cellular automata game written in Java using the Processing library. Put some "sand" onto the canvas and watch it fall or interact with other types of "sand".
 
 ## Usage
 
