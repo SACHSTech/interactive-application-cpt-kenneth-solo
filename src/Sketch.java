@@ -4,6 +4,7 @@ import java.util.function.Supplier;
 
 import processing.core.PApplet;
 import processing.core.PFont;
+import processing.event.KeyEvent;
 import processing.event.MouseEvent;
 
 // TODO: https://fonts.google.com/noto/specimen/Noto+Emoji source font
@@ -62,9 +63,10 @@ public class Sketch extends PApplet {
     public String[] toolSymbols = {"🪣", "🖌️", "🧼", "🔍"};
 
     public boolean runSimulation = true;
-    public boolean debuggingMetrics = true;
+    public boolean debuggingMetrics = false;
     public boolean canInteractStatusBar = true;
     public boolean canInteractCanvas = true;
+    public boolean brushSelectionOpen = false;
 
     public int brushRadius = 2;
     public long[][] canvas;
@@ -84,6 +86,8 @@ public class Sketch extends PApplet {
     public PFont fontEmoji;
     public PFont fontDefault;
 
+    public int brushSelectionScrollAt = 0;
+
     public final byte TYPE_AIR = 0;
     public final byte TYPE_SAND = 1;
     public final byte TYPE_WATER = 2;
@@ -96,7 +100,7 @@ public class Sketch extends PApplet {
     public final long CELL_AIR = cellEncodeData(color(0), TYPE_AIR, 0, (byte)(MASKC_FLOATING_DISPLACEABLE));
     public final long CELL_BARRIER_FLOOR = cellEncodeData(color(0), TYPE_BARRIER, 0, (byte)(MASK_INDESTRUCTABLE | MASKC_NATURALLY_IMMOVABLE | MASK_TICKED));
 
-    public byte selectedType = TYPE_SAND;
+    public byte selectedType = TYPE_RAINBOW_SAND;
 
     public final Supplier<Integer> PALETTE_SAND = colorGeneratePaletteRandomizer(
         color(246, 215, 176),
@@ -162,20 +166,133 @@ public class Sketch extends PApplet {
             renderToolOverlay(canvasX, canvasY, 0);
         }
 
+        if (brushSelectionOpen) renderBrushPanel();
         setCursor();
 
         if (debuggingMetrics) renderDebuggers();
     }
     
     @Override
-    public void mouseDragged(MouseEvent event) {
+    public void mouseDragged() {
         toolApplyOnCanvas();
     }
 
     @Override
     public void mousePressed(MouseEvent event) {
-        if (canInteractStatusBar) handleStatusBarMouse();
-        toolApplyOnCanvas();
+        if (brushSelectionOpen) {
+            handleBrushPanelMousePress();
+        } else if (event.getButton() == LEFT) {
+            if (canInteractStatusBar) handleStatusBarMouse();
+            toolApplyOnCanvas();
+        } else if (event.getButton() == CENTER) {
+            toolApplyOnCanvas();
+        } else {
+            // TODO: eraser temp
+        }
+    }
+
+    @Override
+    public void mouseWheel(MouseEvent event) {
+        int direction = event.getCount();
+
+        if (direction < 0) {
+            brushSelectionScrollAt++;
+            brushRadius++;
+        } else if (direction > 0) {
+            if (brushRadius > 0) brushRadius--;
+            if (brushSelectionScrollAt > 0) brushSelectionScrollAt--;
+        }
+    }
+
+    @Override
+    public void keyPressed(KeyEvent event) {
+        int keyCode = event.getKeyCode();
+        int key = event.getKey();
+
+        // top numbers on the keyboard from 1-4 (there are four tools)
+        if (keyCode >= 49 && keyCode <= 52) selectedTool = keyCode - 49;
+        if (keyCode == java.awt.event.KeyEvent.VK_F3) debuggingMetrics = !debuggingMetrics;
+        if (key == ' ') runSimulation = !runSimulation;  // 32 is space
+        if (keyCode == SHIFT) {
+            brushSelectionScrollAt = 0;
+            brushSelectionOpen = !brushSelectionOpen;
+        }
+
+
+        if (keyCode == UP) {
+            brushRadius++;
+        } else if (keyCode == DOWN && brushRadius > 0) {
+            brushRadius--;
+        }
+    }
+
+    /**
+     * Handles mouse input for the cell selection panel for the brush
+     * @see #renderBrushPanel() Renderer Function
+     */
+    public void handleBrushPanelMousePress() {
+        if (mouseX < (width * 0.1f) || mouseX > (width * 0.9f) || mouseY < (height * 0.1f) || mouseY > (height * 0.9f)) return;
+        push();
+        textFont(fontDefault);
+        textSize(20);
+
+        int numberOfTypesIndexes = typeNames.size() - 1;
+        float textHeight = textAscent() + textDescent();
+        String[] cellNames = new String[numberOfTypesIndexes + 1];
+        cellNames = typeNames.keySet().<String>toArray(cellNames);
+        
+        int clickedYIndex = (int)((mouseY - (height * 0.1f)) / textHeight);
+        System.out.println(mouseY);
+        System.out.println(textHeight);
+        System.out.println((mouseY - (height * 0.1f)));
+
+        int index = Math.clamp(brushSelectionScrollAt + clickedYIndex, 0, numberOfTypesIndexes);
+
+        selectedType = typeNames.get(cellNames[index]);
+        pop();
+    }
+
+    /**
+     * Renders the cell selection panel for the brush
+     * @see #handleBrushPanelMousePress() Input Handler Function
+     */
+    public void renderBrushPanel() {
+        push();
+        colorMode(RGB, 255, 255, 255, 255);
+        textFont(fontDefault);
+        textAlign(LEFT, TOP);
+        textSize(20);
+        
+        fill(0, 127);
+        rect(0, 0, width, height);
+
+        int borderWidth = 4;
+        translate(width * 0.1f, height * 0.1f);
+
+        fill(255);
+        rect(-borderWidth, -borderWidth, width * 0.8f + (borderWidth * 2), height * 0.8f + (borderWidth * 2));
+        fill(0);
+        rect(0, 0, width * 0.8f, height * 0.8f);
+
+        float modalHeight = height * 0.8f;
+        int numberOfTypesIndexes = typeNames.size() - 1;
+        float textHeight = textAscent() + textDescent();
+        int fittableTexts = (int)(modalHeight / textHeight);
+        String[] cellNames = new String[numberOfTypesIndexes + 1];
+        cellNames = typeNames.keySet().<String>toArray(cellNames);
+        
+        fill(255);
+        for (int i = 0; i < fittableTexts; i++) {
+            int index = Math.clamp(brushSelectionScrollAt + i, 0, numberOfTypesIndexes);
+            
+            String textToRender = cellNames[index];
+            if (typeNames.get(textToRender) == selectedType) textToRender = "> " + textToRender;
+            text(textToRender, 0, i * textHeight);
+
+            if (i + brushSelectionScrollAt >= numberOfTypesIndexes) break;
+        }
+
+        pop();
     }
 
     /** Debug Renderers */
@@ -250,10 +367,10 @@ public class Sketch extends PApplet {
      * @see #toolApplyOnCanvas() Helper Function for this function
      */
     public void toolApplyOnCanvas(int cellX, int cellY) {
-        final int xBeginBrush = Math.clamp(cellX - brushRadius, 0, canvasWidth - 1);
-        final int yBeginBrush = Math.clamp(cellY - brushRadius, 0, canvasHeight - 1);
-        final int xEndBrush = Math.clamp(cellX + brushRadius, 0, canvasWidth - 1) ;
-        final int yEndBrush = Math.clamp(cellY + brushRadius, 0, canvasHeight - 1) ;
+        int xBeginBrush = Math.clamp(cellX - brushRadius, 0, canvasWidth - 1);
+        int yBeginBrush = Math.clamp(cellY - brushRadius, 0, canvasHeight - 1);
+        int xEndBrush = Math.clamp(cellX + brushRadius, 0, canvasWidth - 1) ;
+        int yEndBrush = Math.clamp(cellY + brushRadius, 0, canvasHeight - 1) ;
 
         TypeCellCreate cellCreator = typeCellCreate.get(selectedType);
 
@@ -279,8 +396,8 @@ public class Sketch extends PApplet {
     public void handleStatusBarMouse() {
         if (!mouseWithinStatusBar()) return;
 
-        final int simulationControlEnd = statusbarHeight;
-        final int stepEnd = simulationControlEnd * 2;
+        int simulationControlEnd = statusbarHeight;
+        int stepEnd = simulationControlEnd * 2;
         if (mouseX <= simulationControlEnd) { // pause/play
             runSimulation = !runSimulation;
         } else if (mouseX <= stepEnd) { // step
@@ -288,13 +405,13 @@ public class Sketch extends PApplet {
         }
 
         // tool selection
-        final int toolSectionBegin = stepEnd + statusbarSeperatorWidth;
-        final int toolSectionEnd = toolSectionBegin + (statusbarHeight * toolSymbols.length);
+        int toolSectionBegin = stepEnd + statusbarSeperatorWidth;
+        int toolSectionEnd = toolSectionBegin + (statusbarHeight * toolSymbols.length);
         if (mouseX >= toolSectionBegin && mouseX <= toolSectionEnd) {
             selectedTool = Math.floorDiv((mouseX - (statusbarHeight * 2) - statusbarSeperatorWidth), statusbarHeight);
         }
 
-        final int helpBegin = width - statusbarHeight;
+        int helpBegin = width - statusbarHeight;
         if (mouseX > helpBegin) { // help button
             System.out.println("help pressed");
         }
@@ -312,13 +429,15 @@ public class Sketch extends PApplet {
      * Sets the cursor icon when hovering over an interactable
      */
     public void setCursor() {
-        if (mouseWithinStatusBar()) {
-            final int toolBarBegin = (statusbarHeight * 2) + statusbarSeperatorWidth;
-            final int toolBarEnd = toolBarBegin + (statusbarHeight * toolSymbols.length);
+        if (brushSelectionOpen) {
+            cursor(ARROW);
+        } else if (mouseWithinStatusBar()) {
+            int toolBarBegin = (statusbarHeight * 2) + statusbarSeperatorWidth;
+            int toolBarEnd = toolBarBegin + (statusbarHeight * toolSymbols.length);
             
-            final boolean hoveringTools = (mouseX >= toolBarBegin && mouseX <= toolBarEnd);
-            final boolean hoveringRunStep = mouseX <= (statusbarHeight * 2);
-            final boolean hoveringHelp = mouseX > width - statusbarHeight;
+            boolean hoveringTools = (mouseX >= toolBarBegin && mouseX <= toolBarEnd);
+            boolean hoveringRunStep = mouseX <= (statusbarHeight * 2);
+            boolean hoveringHelp = mouseX > width - statusbarHeight;
 
             if (hoveringRunStep || hoveringTools || hoveringHelp) {
                 cursor(HAND);
@@ -380,8 +499,8 @@ public class Sketch extends PApplet {
             yOffset = radius - (canvasHeight - y - 1);
         }
 
-        final int brushWidth = (radius * 2 + 1 - xOffset) * sandSize;
-        final int brushHeight = (radius * 2 + 1 - yOffset) * sandSize;
+        int brushWidth = (radius * 2 + 1 - xOffset) * sandSize;
+        int brushHeight = (radius * 2 + 1 - yOffset) * sandSize;
 
         fill(255, 200);
         rect(
@@ -637,13 +756,13 @@ public class Sketch extends PApplet {
         if (netDirection == 2) return false;
         if (cellIsFlagOn(cellBelow, MASK_TICKED)) return false;
         
-        final boolean isSameType =              cellGetType(cell) == cellGetType(cellBelow);
-        final boolean isBothSwappable =         !cellIsFlagOn(cell | cellBelow, MASK_SELF_CANT_SWAP);
-        final boolean isColliding =             netDirection == 0 && cellIsFlagOn(cellBelow, MASK_SWAP_UP);
+        boolean isSameType =              cellGetType(cell) == cellGetType(cellBelow);
+        boolean isBothSwappable =         !cellIsFlagOn(cell | cellBelow, MASK_SELF_CANT_SWAP);
+        boolean isColliding =             netDirection == 0 && cellIsFlagOn(cellBelow, MASK_SWAP_UP);
 
-        final boolean canMutuallySwap =         (cellIsFlagOn(cell, MASK_CAN_SWAP_WITH_ANY) && cellBelowDirection == -1)
-                                                || (cellDirection == 1 && cellIsFlagOn(cellBelow, MASK_CAN_SWAP_WITH_ANY));
-        final boolean displaceablePresent =     netDirection == 1;
+        boolean canMutuallySwap =         (cellIsFlagOn(cell, MASK_CAN_SWAP_WITH_ANY) && cellBelowDirection == -1)
+                                            || (cellDirection == 1 && cellIsFlagOn(cellBelow, MASK_CAN_SWAP_WITH_ANY));
+        boolean displaceablePresent =     netDirection == 1;
 
         if (
             (isSameType && isColliding && isBothSwappable)
