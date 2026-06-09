@@ -24,3 +24,4 @@ bin/*
 target/
 
 .vscode/settings.json
+docs/

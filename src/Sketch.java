@@ -25,10 +25,13 @@ public class Sketch extends PApplet {
      *      See below for misc flags. start at {@link #MASK_TICKED}
      */
 
+    /** Cell Encoding: Color Sector */
     public final long MASK_COLOR =             Long.parseUnsignedLong("11111111 11111111 11111111 00000000 00000000 00000000 00000000 00000000".replace(" ", ""), 2);
     public final int SHIFT_COLOR =             40;
+    /** Cell Encoding: Type Sector */
     public final long MASK_TYPE =              Long.parseUnsignedLong("00000000 00000000 00000000 11111111 00000000 00000000 00000000 00000000".replace(" ", ""), 2);
     public final int SHIFT_TYPE =              32;
+    /** Cell Encoding: Metadata Sector */
     public final long MASK_METADATA =          Long.parseUnsignedLong("00000000 00000000 00000000 00000000 11111111 11111111 11111111 00000000".replace(" ", ""), 2);
     public final int SHIFT_METADATA =          8;
 
@@ -352,9 +355,7 @@ public class Sketch extends PApplet {
         return mouseX >= 0 && mouseX <= width && mouseY < height && mouseY >= height - statusbarContentHeight;
     }
 
-    /**
-     * Sets the cursor icon when hovering over an interactable
-     */
+    /** Sets the cursor icon when hovering over an interactable */
     public void setCursor() {
         if (brushSelectionOpen) {
             cursor(ARROW);
@@ -717,7 +718,7 @@ public class Sketch extends PApplet {
      * @param x cell x position
      * @param y cell y position
      * @param forced if true then the cell will be removed even with {@link #MASK_INDESTRUCTABLE}, else the cell can persist if that mask is set
-     * @return true if it was removed successfully, otherwise false
+     * @return true if it was removed successfully, false otherwise
      */
     public boolean cellRemove(int x, int y, boolean forced) {
         if (canvasIsCoordinatesOutOfBounds(x, y)) return false;
@@ -810,7 +811,7 @@ public class Sketch extends PApplet {
         cellMoveAbsoluteInternal(x, y, x + relX, y + relY);
     }
 
-        /**
+    /**
      * Checks if the mouse is outside the canvas region
      * @param canvasX the x coordinate of the top left of the canvas
      * @param canvasY the y coordinate of the top left of the canvas
